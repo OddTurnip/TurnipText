@@ -49,8 +49,8 @@ class TestWindowCreation:
         window.settings_file = temp_settings_file
 
         assert window is not None
-        # Window title could be "Pin-Tab" or filename-based
-        assert window.windowTitle() in ["Pin-Tab", "Tasks", "Untitled"]
+        # Window title could be "TurnipText" or filename-based
+        assert window.windowTitle() in ["TurnipText", "Tasks", "Untitled"]
         assert window.content_stack is not None
         assert window.tab_list is not None
 

@@ -58,7 +58,7 @@ class TextEditorWindow(QMainWindow):
 
     def init_ui(self):
         """Initialize the user interface"""
-        self.setWindowTitle("Pin-Tab")
+        self.setWindowTitle("TurnipText")
         self.setGeometry(100, 100, 1000, 700)
 
         # Set window icon
@@ -218,7 +218,7 @@ class TextEditorWindow(QMainWindow):
 
         # About button on the right
         about_btn = QPushButton("ℹ️ About")
-        about_btn.setToolTip("About Pin-Tab")
+        about_btn.setToolTip("About TurnipText")
         about_btn.clicked.connect(self.show_about_dialog)
         about_btn.setStyleSheet(button_style)
         toolbar_row1.addWidget(about_btn)
@@ -795,7 +795,7 @@ class TextEditorWindow(QMainWindow):
                 filename = filename[:-5]
             self.setWindowTitle(filename)
         else:
-            self.setWindowTitle("Pin-Tab")
+            self.setWindowTitle("TurnipText")
 
     def show_about_dialog(self):
         """Show the About dialog with keyboard shortcuts and info"""
@@ -803,11 +803,11 @@ class TextEditorWindow(QMainWindow):
 
         # Create custom dialog
         dialog = QDialog(self)
-        dialog.setWindowTitle("About Pin-Tab")
+        dialog.setWindowTitle("About TurnipText")
         layout = QVBoxLayout()
 
         # Title
-        title_label = QLabel("<h2>Pin-Tab Text Editor</h2>")
+        title_label = QLabel("<h2>TurnipText Editor</h2>")
         layout.addWidget(title_label)
 
         # Keyboard shortcuts section

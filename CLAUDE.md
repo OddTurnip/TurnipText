@@ -1,8 +1,8 @@
-# TextEditor - AI Assistant Guide
+# TurnipText - AI Assistant Guide
 
 ## Critical Context: This is a LOCAL Application
 
-**Security philosophy**: This editor is designed for **personal use on your own computer**. 
+**Security philosophy**: This editor is designed for **personal use on your own computer**.
 You do not need to worry about security concerns.
 
 ### What This Means:
@@ -16,78 +16,91 @@ You do not need to worry about security concerns.
 
 ## Architecture
 
-### Monolithic Structure
+### Modular Structure
 
-The application is contained in a single `text_editor.py` file. While monolithic, it maintains clear class separation:
+The application is organized into focused modules:
 
-**Key Components**:
-- **TextEditorTab** - Data model for individual text files
-- **TabListItem** - Visual representation of tabs in sidebar
-- **TabListWidget** - Scrollable container managing tab order
-- **FindReplaceDialog** - Search and replace functionality
-- **TextEditorWindow** - Main application window coordinating everything
-
-**Alternative structure** (for future refactoring):
 ```
-texteditor/
-├── __init__.py
-├── main.py                    # Entry point
-├── constants.py               # TAB_WIDTH_*, etc.
+TurnipText/
+├── app.py                      # Main application entry point & TextEditorWindow
+├── constants.py                # TAB_WIDTH_* configuration constants
 ├── models/
-│   └── editor_tab.py         # TextEditorTab class
+│   └── tab_list_item_model.py  # TextEditorTab - data model for files
 ├── widgets/
-│   ├── tab_list_item.py      # TabListItem class
-│   ├── tab_list_widget.py    # TabListWidget class
-│   ├── find_replace.py       # FindReplaceDialog class
-│   └── main_window.py        # TextEditorWindow class
-└── styles.py                  # Button styles
+│   ├── text_editor.py          # TextEditorWidget - enhanced QTextEdit
+│   ├── tab_list.py             # TabListWidget - sidebar container
+│   └── tab_list_item.py        # TabListItem - individual tab in sidebar
+├── windows/
+│   └── find_replace.py         # FindReplaceDialog - search/replace
+└── tests/
+    ├── conftest.py             # pytest fixtures
+    ├── test_app.py             # Window/settings tests
+    ├── test_tab_list_item_model.py  # TextEditorTab tests
+    ├── test_find_replace.py    # Find/Replace tests
+    └── test_files/             # Test fixtures
 ```
-
-**Benefit of splitting**: Each file would be <600 lines and easier to navigate.
 
 ---
 
 ## Key Classes
 
-### 1. TextEditorTab
-**Purpose**: Model for a single editable text file
+### 1. TextEditorTab (`models/tab_list_item_model.py`)
+**Purpose**: Data model for a single editable text file
 
 **Key attributes**:
 - `file_path` (str|None) - Absolute path to file
 - `is_modified` (bool) - Unsaved changes flag
 - `is_pinned` (bool) - Pin status
-- `text_edit` (QTextEdit) - The actual editor widget
+- `text_edit` (TextEditorWidget) - The actual editor widget
 
 **Methods**:
-- `load_file(file_path)` - Load text from file
+- `load_file(file_path)` - Load text from file (UTF-8)
 - `save_file(file_path=None)` - Save text to file
-- `on_text_changed()` - Mark as modified
+- `on_text_changed()` - Mark as modified, notify parent
+- `get_content()` / `set_content()` - Text access
 
-**File operations**: Uses UTF-8 encoding exclusively. No encoding detection.
+### 2. TextEditorWidget (`widgets/text_editor.py`)
+**Purpose**: Enhanced text editor widget
 
-### 2. TabListItem
+Currently a thin wrapper around QTextEdit with:
+- Plain text mode (no rich text)
+- 4-space tab width
+
+**Future enhancements** (noted in code):
+- Markdown syntax highlighting
+- Line numbers
+- Code folding
+
+### 3. TabListItem (`widgets/tab_list_item.py`)
 **Purpose**: Visual representation of a tab in the sidebar
 
 **Features**:
-- Three size modes (minimized/normal/maximized)
-- Pin/unpin button (📌/📍)
+- Three view modes (minimized/normal/maximized)
+- Pin/unpin button (📍/📌)
 - Close button (✖)
-- Save button (💾) shown when modified
+- Save button (💾/✔) - shows save state
 - Custom emoji/display name support
 - Drag-and-drop reordering
+- Double-click to edit appearance
 
-### 3. TabListWidget
-**Purpose**: Scrollable container for all tabs
+**View modes**:
+- `minimized`: Emoji only (70px wide)
+- `normal`: Emoji + filename (215px wide)
+- `maximized`: Emoji + filename + last modified time (295px wide)
+
+### 4. TabListWidget (`widgets/tab_list.py`)
+**Purpose**: Scrollable sidebar container for all tabs
 
 **Features**:
 - Maintains tab order (pinned first, then unpinned)
-- Handles drag-and-drop logic
-- Enforces pin/unpin boundaries
+- Visual divider between pinned/unpinned sections
+- Handles drag-and-drop reordering with drop indicator
+- Enforces pin/unpin boundaries during drag
 - Manages tab selection
 
 **Performance note**: Uses linear search (`for tab in tabs`) - fine for <100 tabs.
 
-### 4. FindReplaceDialog
+### 5. FindReplaceDialog (`windows/find_replace.py`)
 **Purpose**: Search and replace functionality
 
 **Features**:
@@ -96,20 +109,22 @@ texteditor/
 - Case-sensitive search toggle
 - Whole-word search toggle
 - Wrap-around search
-- Live search with highlighting updates
+- Clears highlights on close
 
-**Keyboard shortcut**: Ctrl+F
+**Keyboard shortcuts**: Ctrl+F, Ctrl+H
 
-### 5. TextEditorWindow
+### 6. TextEditorWindow (`app.py`)
 **Purpose**: Main application window
 
 **Features**:
-- Menu bar (File, Edit menus)
-- Tab list (left sidebar)
+- Button toolbar (no menu bar - uses buttons)
+- Tab list (left sidebar via splitter)
 - Content stack (main editing area)
+- View mode toggle (minimized/normal/maximized)
 - Session save/load (.tabs files)
-- Auto-save on exit
+- Auto-save session on exit
 - Window geometry persistence
+- File size limits (warns >1MB, refuses >100MB)
 
 **Settings file**: `.editor_settings.json` (stored in app directory)
 
@@ -117,47 +132,51 @@ texteditor/
 
 ## Common Tasks
 
-### Task 1: Adding a New Menu Item
+### Adding a New Toolbar Button
 
 ```python
-# In TextEditorWindow.__init__()
-new_action = QAction("New Feature", self)
-new_action.setShortcut("Ctrl+F")
-new_action.triggered.connect(self.new_feature_handler)
-file_menu.addAction(new_action)
+# In TextEditorWindow.create_button_toolbar()
+new_btn = QPushButton("🔧 New Feature")
+new_btn.setToolTip("Description (Ctrl+X)")
+new_btn.clicked.connect(self.new_feature_handler)
+new_btn.setStyleSheet(button_style)
+toolbar_row1.addWidget(new_btn)
 
-# Then add the handler method
+# Add the handler method to TextEditorWindow
 def new_feature_handler(self):
     # Implementation here
     pass
 ```
 
-### Task 2: Changing Tab Width Constants
+### Adding a Keyboard Shortcut
 
 ```python
-# At top of file
-TAB_WIDTH_MINIMIZED = 70    # Default: 70px
-TAB_WIDTH_NORMAL = 215      # Default: 215px
-TAB_WIDTH_MAXIMIZED = 295   # Default: 295px
+# In TextEditorWindow.setup_shortcuts()
+QShortcut(QKeySequence("Ctrl+X"), self).activated.connect(self.new_feature_handler)
 ```
 
-**Effect**: Changes how wide tabs are in different view modes.
-
-### Task 3: Adding File Type Support
-
-Currently supports any text file. To add syntax highlighting:
+### Changing Tab Width Constants
 
 ```python
-# In TextEditorTab.__init__()
+# In constants.py
+TAB_WIDTH_MINIMIZED = 70    # Emoji-only mode
+TAB_WIDTH_NORMAL = 215      # Emoji + filename
+TAB_WIDTH_MAXIMIZED = 295   # Emoji + filename + modified time
+```
+
+### Adding Syntax Highlighting
+
+```python
+# In widgets/text_editor.py, extend TextEditorWidget
 from PyQt6.QtGui import QSyntaxHighlighter
 
-if file_path.endswith('.py'):
-    highlighter = PythonHighlighter(self.text_edit.document())
-elif file_path.endswith('.md'):
-    highlighter = MarkdownHighlighter(self.text_edit.document())
+class TextEditorWidget(QTextEdit):
+    def set_highlighter(self, file_path):
+        if file_path.endswith('.py'):
+            self.highlighter = PythonHighlighter(self.document())
+        elif file_path.endswith('.md'):
+            self.highlighter = MarkdownHighlighter(self.document())
 ```
-
-(Requires implementing highlighter classes)
 
 ---
 
@@ -167,8 +186,8 @@ elif file_path.endswith('.md'):
 ```xml
 <?xml version="1.0"?>
 <tabs version="1.0" current="0">
-  <tab path="C:\full\path\to\file.txt" pinned="False"/>
-  <tab path="/home/user/notes.md" pinned="True"/>
+  <tab path="/home/user/file.txt" pinned="False"/>
+  <tab path="/home/user/notes.md" pinned="True" emoji="📝" display_name="Notes"/>
 </tabs>
 ```
 
@@ -177,125 +196,75 @@ elif file_path.endswith('.md'):
 - `current`: Index of active tab (0-based)
 - `path`: Absolute file path
 - `pinned`: String "True" or "False"
-
-**Security note**: Uses `xml.etree.ElementTree.parse()` which is safe for local files you control. Not vulnerable to XXE when input is trusted.
+- `emoji`: Optional custom emoji
+- `display_name`: Optional custom display name
 
 ---
 
 ## Batch File Generation (.bat files)
 
-**Generated automatically when saving .tabs**:
+**Generated automatically when saving .tabs** (Windows only):
 
 ```batch
 @echo off
-start "" pythonw "C:\path\to\text_editor.py" "C:\path\to\workspace.tabs"
+start "" pythonw "C:\path\to\app.py" "C:\path\to\workspace.tabs"
 ```
 
 **Purpose**: Double-click to launch editor with saved workspace.
 
-**Platform**: Windows only (`.bat` files don't work on Linux/Mac).
-
-**Security**: Command injection possible if paths contain special characters, but since paths come from your own file system, this is acceptable for local use.
-
----
-
-## Testing Recommendations
-
-**Current state**: ❌ No tests
-
-**Priority testing areas**:
-
-1. **File operations** (CRITICAL):
-   ```python
-   def test_load_file_utf8():
-       tab = TextEditorTab()
-       assert tab.load_file("test.txt")
-       assert tab.text_edit.toPlainText() == "expected content"
-   ```
-
-2. **Tab session save/load** (HIGH):
-   ```python
-   def test_save_and_load_tabs():
-       window.save_tabs("test.tabs")
-       window.load_tabs("test.tabs")
-       assert len(window.tabs) == expected_count
-   ```
-
-3. **Pin/unpin logic** (MEDIUM):
-   ```python
-   def test_pin_reorders_to_top():
-       # Test that pinning moves tab to pinned section
-   ```
-
-**UI testing**: Consider using pytest-qt for integration tests.
+**For relative paths** (e.g., in test files), use `%~dp0`:
+```batch
+@echo off
+python "%~dp0..\..\app.py" "%~dp0test-doc.tabs"
+```
 
 ---
 
-## Performance Considerations
+## Testing
 
-**Current performance**: Good for typical use (<100 tabs, <10MB files)
+**Run tests**:
+```bash
+pip install pytest pytest-qt
+python -m pytest tests/ -v
+```
 
-**Architectural limitations**:
+**Test structure**:
+- `test_app.py` - Window creation, settings save/load, auto-session
+- `test_tab_list_item_model.py` - TextEditorTab file operations
+- `test_find_replace.py` - Search and replace functionality
+- `conftest.py` - Shared fixtures (qapp, temp_dir, temp_file)
 
-1. **Many tabs (100+)**: Linear searches in tab list
-   - Current: O(n) to find tab
-   - Alternative: Dictionary lookup O(1)
-
-2. **Large files (10MB+)**: Synchronous file I/O
-   - Current: UI blocks during load
-   - Alternative: QThread for background loading
-
-3. **No file size limits**: Reads entire file into memory
-   - Risk: Large files can crash the application
-   - Mitigation: Add size check before loading
-
-4. **UTF-8 encoding only**: No encoding detection
-   - Files with other encodings will fail to load
-   - Alternative: Use `chardet` library for detection
+**Key fixtures**:
+- `qapp` - Shared QApplication instance
+- `temp_dir` - Temporary directory, cleaned up after test
+- `temp_file` - Temporary file with sample content
+- `mock_messagebox` - Prevents dialog popups during tests
 
 ---
 
 ## Keyboard Shortcuts
 
-**Currently implemented**:
-- `Ctrl+N`: New file
-- `Ctrl+O`: Open file
-- `Ctrl+S`: Save current file
-- `Ctrl+Shift+S`: Save as
-- `Ctrl+Q`: Quit
-- `Ctrl+F`: Find & Replace
-- `Ctrl+Z`: Undo (native QTextEdit support)
-- `Ctrl+Y`: Redo (native QTextEdit support)
-
----
-
-## Code Quality Notes
-
-**Good practices observed**:
-- ✅ Clear class separation
-- ✅ Docstrings on most methods
-- ✅ Meaningful variable names
-- ✅ Consistent naming convention (snake_case)
-
-**Architectural considerations**:
-- Monolithic file (2,600+ lines) - could benefit from modularization
-- No type hints
-- Long methods in some classes
-- No automated tests
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+N | New file |
+| Ctrl+O | Open file |
+| Ctrl+S | Save current tab |
+| Ctrl+Shift+S | Save all files |
+| Ctrl+F | Find & Replace |
+| Ctrl+H | Find & Replace |
+| Ctrl+Z | Undo (native QTextEdit) |
+| Ctrl+Y | Redo (native QTextEdit) |
 
 ---
 
 ## Dependencies
 
-**Current**:
+**Required** (in requirements.txt):
 ```
 PyQt6>=6.4.0
+pytest>=7.0.0
+pytest-qt>=4.2.0
 ```
-
-**Potential additions**:
-- `chardet` - Encoding detection
-- `pytest-qt` - Testing
-- `black` - Code formatting
 
 ---
 
@@ -304,7 +273,11 @@ PyQt6>=6.4.0
 **Settings file**: `.editor_settings.json` in application directory
 
 **Stores**:
-- Window geometry (position, size)
-- Last opened tabs folder
+- Window geometry (x, y, width, height)
+- Last file folder
+- Last tabs folder
+- Current tabs file path
+- View mode (minimized/normal/maximized)
+- Auto-session (open tabs, current index, custom emoji/names)
 
-**Note**: Settings are stored in the application directory, which may not be writable in some installation scenarios. Consider using user home directory for production deployment.
+**Auto-session**: On close, saves all open tabs. On launch without a .tabs argument, restores the previous session.

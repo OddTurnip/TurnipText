@@ -1,5 +1,5 @@
 """
-Constants used throughout the TextEditor application.
+Constants used throughout the TurnipText application.
 """
 
 # Tab sidebar width constants (in pixels)
