@@ -100,10 +100,10 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 
     def _apply_inline_formatting(self, text, escaped):
         """Apply inline formatting (bold, italic, code) to text."""
-        # Process code blocks first (they prevent other formatting inside)
-        code_regions = []
+        # Track all formatted regions to prevent overlapping
+        formatted_regions = []
 
-        # Find inline code spans (single backtick)
+        # Process code blocks first (they prevent other formatting inside)
         pos = 0
         while pos < len(text):
             if text[pos] == '`' and pos not in escaped:
@@ -113,7 +113,7 @@ class MarkdownHighlighter(QSyntaxHighlighter):
                     if text[end] == '`' and end not in escaped:
                         # Found closing backtick
                         self.setFormat(pos, end - pos + 1, self.code_format)
-                        code_regions.append((pos, end))
+                        formatted_regions.append((pos, end))
                         pos = end + 1
                         break
                     end += 1
@@ -122,48 +122,54 @@ class MarkdownHighlighter(QSyntaxHighlighter):
             else:
                 pos += 1
 
-        # Helper to check if position is inside a code region
-        def in_code(start, end):
-            for code_start, code_end in code_regions:
-                if start >= code_start and end <= code_end + 1:
-                    return True
-            return False
-
         # Process bold+italic (*** or ___) - must be done before bold and italic
-        self._apply_pattern(text, escaped, r'\*\*\*(.+?)\*\*\*', self.bold_italic_format, code_regions)
-        self._apply_pattern(text, escaped, r'___(.+?)___', self.bold_italic_format, code_regions)
+        formatted_regions.extend(
+            self._apply_pattern(text, escaped, r'\*\*\*(.+?)\*\*\*', self.bold_italic_format, formatted_regions)
+        )
+        formatted_regions.extend(
+            self._apply_pattern(text, escaped, r'___(.+?)___', self.bold_italic_format, formatted_regions)
+        )
 
         # Process bold (** or __)
-        self._apply_pattern(text, escaped, r'\*\*(.+?)\*\*', self.bold_format, code_regions)
-        self._apply_pattern(text, escaped, r'__(.+?)__', self.bold_format, code_regions)
+        formatted_regions.extend(
+            self._apply_pattern(text, escaped, r'\*\*(.+?)\*\*', self.bold_format, formatted_regions)
+        )
+        formatted_regions.extend(
+            self._apply_pattern(text, escaped, r'__(.+?)__', self.bold_format, formatted_regions)
+        )
 
         # Process italic (* or _)
         # Need to be careful not to match ** or __
-        self._apply_single_emphasis(text, escaped, '*', code_regions)
-        self._apply_single_emphasis(text, escaped, '_', code_regions)
+        self._apply_single_emphasis(text, escaped, '*', formatted_regions)
+        self._apply_single_emphasis(text, escaped, '_', formatted_regions)
 
-    def _apply_pattern(self, text, escaped, pattern, fmt, code_regions):
-        """Apply a regex pattern format, respecting escaped chars and code regions."""
+    def _apply_pattern(self, text, escaped, pattern, fmt, excluded_regions):
+        """Apply a regex pattern format, respecting escaped chars and excluded regions.
+        Returns list of newly formatted regions."""
+        new_regions = []
         for match in re.finditer(pattern, text):
             start = match.start()
-            end = match.end()
+            end = match.end() - 1  # Convert to inclusive end for overlap check
 
-            # Check if any delimiter character is escaped
+            # Check if start delimiter is escaped
             if start in escaped:
                 continue
 
-            # Check if inside code region
-            in_code = False
-            for code_start, code_end in code_regions:
-                if start >= code_start and end <= code_end + 1:
-                    in_code = True
+            # Check if overlaps with any excluded region
+            overlaps = False
+            for region_start, region_end in excluded_regions:
+                if start <= region_end and end >= region_start:
+                    overlaps = True
                     break
-            if in_code:
+            if overlaps:
                 continue
 
-            self.setFormat(start, end - start, fmt)
+            self.setFormat(start, match.end() - start, fmt)
+            new_regions.append((start, end))
 
-    def _apply_single_emphasis(self, text, escaped, char, code_regions):
+        return new_regions
+
+    def _apply_single_emphasis(self, text, escaped, char, excluded_regions):
         """Apply single emphasis (* or _) avoiding double/triple emphasis."""
         pos = 0
         while pos < len(text):
@@ -187,14 +193,14 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 
                         if before_end != char and after_end != char:
                             # Found closing delimiter
-                            # Check not in code region
-                            in_code = False
-                            for code_start, code_end in code_regions:
-                                if pos >= code_start and end <= code_end + 1:
-                                    in_code = True
+                            # Check if overlaps with any excluded region
+                            overlaps = False
+                            for region_start, region_end in excluded_regions:
+                                if pos <= region_end and end >= region_start:
+                                    overlaps = True
                                     break
 
-                            if not in_code:
+                            if not overlaps:
                                 self.setFormat(pos, end - pos + 1, self.italic_format)
                             found = True
                             pos = end + 1
