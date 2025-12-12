@@ -240,14 +240,18 @@ class TextEditorWidget(QTextEdit):
         """Enable or disable markdown syntax highlighting."""
         if enabled:
             if self.highlighter is None:
-                # Block signals to prevent triggering textChanged during highlighter setup
+                # Block signals on both widget and document to prevent textChanged
                 self.blockSignals(True)
+                self.document().blockSignals(True)
                 self.highlighter = MarkdownHighlighter(self.document())
+                self.document().blockSignals(False)
                 self.blockSignals(False)
         else:
             if self.highlighter is not None:
                 # Block signals during highlighter removal as well
                 self.blockSignals(True)
+                self.document().blockSignals(True)
                 self.highlighter.setDocument(None)
                 self.highlighter = None
+                self.document().blockSignals(False)
                 self.blockSignals(False)
