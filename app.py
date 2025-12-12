@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QSplitter, QStackedWidget,
     QLabel, QFrame, QDialog, QLineEdit, QCheckBox
 )
-from PyQt6.QtCore import Qt, QSize, QDateTime
+from PyQt6.QtCore import Qt, QSize, QDateTime, QTimer
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence, QIcon, QGuiApplication
 
 from constants import TAB_WIDTH_MINIMIZED, TAB_WIDTH_NORMAL, TAB_WIDTH_MAXIMIZED, MIN_SPLITTER_WIDTH
@@ -1106,6 +1106,10 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             self.current_tabs_file = tabs_file_path
             self.update_window_title()
 
+            # Schedule deferred reset of modified states after event loop processes
+            # any pending highlighting operations
+            QTimer.singleShot(0, self._reset_all_modified_states)
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load tabs:\n{str(e)}")
 
@@ -1266,9 +1270,24 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                         self.tab_list.select_tab(tab_item)
                         break
 
+            # Schedule deferred reset of modified states after event loop processes
+            # any pending highlighting operations
+            QTimer.singleShot(0, self._reset_all_modified_states)
+
         except Exception as e:
             print(f"Failed to load auto-session: {e}")
             # On error, start with empty editor
+
+    def _reset_all_modified_states(self):
+        """Reset is_modified to False for all tabs that have file paths.
+        Called after loading to clear any spurious modifications from highlighting."""
+        for i in range(self.content_stack.count()):
+            widget = self.content_stack.widget(i)
+            if isinstance(widget, TextEditorTab) and widget.file_path:
+                if widget.is_modified:
+                    widget.is_modified = False
+                    self.tab_list.update_tab_display(widget)
+        self.update_save_all_button()
 
     def closeEvent(self, event):
         """Handle window close event"""
