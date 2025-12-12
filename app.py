@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QSplitter, QStackedWidget,
     QLabel, QFrame, QDialog, QLineEdit, QCheckBox
 )
-from PyQt6.QtCore import Qt, QSize, QDateTime
+from PyQt6.QtCore import Qt, QSize, QDateTime, QTimer
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence, QIcon, QGuiApplication
 
 from constants import TAB_WIDTH_MINIMIZED, TAB_WIDTH_NORMAL, TAB_WIDTH_MAXIMIZED, MIN_SPLITTER_WIDTH
@@ -277,6 +277,16 @@ class TextEditorWindow(QMainWindow):
         self.find_replace_btn.clicked.connect(self.show_find_replace)
         toolbar_row2.addWidget(self.find_replace_btn)
 
+        # Separator
+        toolbar_row2.addSpacing(20)
+
+        # Render Markdown checkbox
+        self.render_markdown_checkbox = QCheckBox("Render Markdown")
+        self.render_markdown_checkbox.setToolTip("Enable markdown syntax highlighting")
+        self.render_markdown_checkbox.setChecked(True)  # Default to checked
+        self.render_markdown_checkbox.stateChanged.connect(self.toggle_markdown_rendering)
+        toolbar_row2.addWidget(self.render_markdown_checkbox)
+
         # Add stretch to push buttons to the left
         toolbar_row2.addStretch()
 
@@ -328,6 +338,7 @@ class TextEditorWindow(QMainWindow):
         tab = TextEditorTab()
         self.content_stack.addWidget(tab)
         self.tab_list.add_tab(tab)
+        self.apply_markdown_to_tab(tab)
         self.switch_to_tab(tab)
 
     def load_file(self):
@@ -393,6 +404,7 @@ class TextEditorWindow(QMainWindow):
                 tab = TextEditorTab(file_path)
                 self.content_stack.addWidget(tab)
                 self.tab_list.add_tab(tab)
+                self.apply_markdown_to_tab(tab)
                 self.switch_to_tab(tab)
         except Exception as e:
             print(f"ERROR in load_file: {e}")
@@ -607,6 +619,31 @@ class TextEditorWindow(QMainWindow):
 
         # Update the tab list view mode
         self.tab_list.set_view_mode(mode)
+
+    def toggle_markdown_rendering(self, state):
+        """Toggle markdown syntax highlighting on all tabs"""
+        enabled = state == Qt.CheckState.Checked.value
+        # Apply to all existing tabs
+        for i in range(self.content_stack.count()):
+            widget = self.content_stack.widget(i)
+            if isinstance(widget, TextEditorTab):
+                was_modified = widget.is_modified
+                widget.text_edit.set_markdown_highlighting(enabled)
+                # Restore modified state (highlighting shouldn't count as modification)
+                if widget.is_modified != was_modified:
+                    widget.is_modified = was_modified
+                    self.tab_list.update_tab_display(widget)
+
+    def apply_markdown_to_tab(self, tab):
+        """Apply current markdown rendering setting to a tab"""
+        if hasattr(self, 'render_markdown_checkbox'):
+            enabled = self.render_markdown_checkbox.isChecked()
+            was_modified = tab.is_modified
+            tab.text_edit.set_markdown_highlighting(enabled)
+            # Restore modified state (highlighting shouldn't count as modification)
+            if tab.is_modified != was_modified:
+                tab.is_modified = was_modified
+                self.tab_list.update_tab_display(tab)
 
     def edit_selected_emoji(self):
         """Edit the emoji and display name for the selected tab"""
@@ -1043,6 +1080,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     # Add to content stack and tab list
                     self.content_stack.addWidget(tab)
                     tab_item = self.tab_list.add_tab(tab)
+                    self.apply_markdown_to_tab(tab)
 
                     # Set custom emoji and display name if they were saved
                     if custom_emoji:
@@ -1068,6 +1106,10 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             self.current_tabs_file = tabs_file_path
             self.update_window_title()
 
+            # Schedule deferred reset of modified states after event loop processes
+            # any pending highlighting operations
+            QTimer.singleShot(0, self._reset_all_modified_states)
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load tabs:\n{str(e)}")
 
@@ -1083,7 +1125,8 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             'last_file_folder': self.last_file_folder,
             'last_tabs_folder': self.last_tabs_folder,
             'current_tabs_file': self.current_tabs_file,
-            'view_mode': self.tab_list.view_mode
+            'view_mode': self.tab_list.view_mode,
+            'render_markdown': self.render_markdown_checkbox.isChecked()
         }
 
         # Auto-save current session
@@ -1163,6 +1206,10 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             view_mode = settings.get('view_mode', 'normal')
             self.set_tab_view_mode(view_mode)
 
+            # Restore markdown rendering preference (default to True)
+            render_markdown = settings.get('render_markdown', True)
+            self.render_markdown_checkbox.setChecked(render_markdown)
+
             if self.current_tabs_file:
                 self.update_window_title()
 
@@ -1200,6 +1247,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     # Add to content stack and tab list
                     self.content_stack.addWidget(tab)
                     tab_item = self.tab_list.add_tab(tab)
+                    self.apply_markdown_to_tab(tab)
 
                     # Set custom emoji and display name if they were saved
                     if custom_emoji:
@@ -1222,9 +1270,24 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                         self.tab_list.select_tab(tab_item)
                         break
 
+            # Schedule deferred reset of modified states after event loop processes
+            # any pending highlighting operations
+            QTimer.singleShot(0, self._reset_all_modified_states)
+
         except Exception as e:
             print(f"Failed to load auto-session: {e}")
             # On error, start with empty editor
+
+    def _reset_all_modified_states(self):
+        """Reset is_modified to False for all tabs that have file paths.
+        Called after loading to clear any spurious modifications from highlighting."""
+        for i in range(self.content_stack.count()):
+            widget = self.content_stack.widget(i)
+            if isinstance(widget, TextEditorTab) and widget.file_path:
+                if widget.is_modified:
+                    widget.is_modified = False
+                    self.tab_list.update_tab_display(widget)
+        self.update_save_all_button()
 
     def closeEvent(self, event):
         """Handle window close event"""
