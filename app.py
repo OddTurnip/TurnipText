@@ -277,6 +277,16 @@ class TextEditorWindow(QMainWindow):
         self.find_replace_btn.clicked.connect(self.show_find_replace)
         toolbar_row2.addWidget(self.find_replace_btn)
 
+        # Separator
+        toolbar_row2.addSpacing(20)
+
+        # Render Markdown checkbox
+        self.render_markdown_checkbox = QCheckBox("Render Markdown")
+        self.render_markdown_checkbox.setToolTip("Enable markdown syntax highlighting")
+        self.render_markdown_checkbox.setChecked(True)  # Default to checked
+        self.render_markdown_checkbox.stateChanged.connect(self.toggle_markdown_rendering)
+        toolbar_row2.addWidget(self.render_markdown_checkbox)
+
         # Add stretch to push buttons to the left
         toolbar_row2.addStretch()
 
@@ -328,6 +338,7 @@ class TextEditorWindow(QMainWindow):
         tab = TextEditorTab()
         self.content_stack.addWidget(tab)
         self.tab_list.add_tab(tab)
+        self.apply_markdown_to_tab(tab)
         self.switch_to_tab(tab)
 
     def load_file(self):
@@ -393,6 +404,7 @@ class TextEditorWindow(QMainWindow):
                 tab = TextEditorTab(file_path)
                 self.content_stack.addWidget(tab)
                 self.tab_list.add_tab(tab)
+                self.apply_markdown_to_tab(tab)
                 self.switch_to_tab(tab)
         except Exception as e:
             print(f"ERROR in load_file: {e}")
@@ -607,6 +619,21 @@ class TextEditorWindow(QMainWindow):
 
         # Update the tab list view mode
         self.tab_list.set_view_mode(mode)
+
+    def toggle_markdown_rendering(self, state):
+        """Toggle markdown syntax highlighting on all tabs"""
+        enabled = state == Qt.CheckState.Checked.value
+        # Apply to all existing tabs
+        for i in range(self.content_stack.count()):
+            widget = self.content_stack.widget(i)
+            if isinstance(widget, TextEditorTab):
+                widget.text_edit.set_markdown_highlighting(enabled)
+
+    def apply_markdown_to_tab(self, tab):
+        """Apply current markdown rendering setting to a tab"""
+        if hasattr(self, 'render_markdown_checkbox'):
+            enabled = self.render_markdown_checkbox.isChecked()
+            tab.text_edit.set_markdown_highlighting(enabled)
 
     def edit_selected_emoji(self):
         """Edit the emoji and display name for the selected tab"""
@@ -1043,6 +1070,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     # Add to content stack and tab list
                     self.content_stack.addWidget(tab)
                     tab_item = self.tab_list.add_tab(tab)
+                    self.apply_markdown_to_tab(tab)
 
                     # Set custom emoji and display name if they were saved
                     if custom_emoji:
@@ -1083,7 +1111,8 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             'last_file_folder': self.last_file_folder,
             'last_tabs_folder': self.last_tabs_folder,
             'current_tabs_file': self.current_tabs_file,
-            'view_mode': self.tab_list.view_mode
+            'view_mode': self.tab_list.view_mode,
+            'render_markdown': self.render_markdown_checkbox.isChecked()
         }
 
         # Auto-save current session
@@ -1163,6 +1192,10 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             view_mode = settings.get('view_mode', 'normal')
             self.set_tab_view_mode(view_mode)
 
+            # Restore markdown rendering preference (default to True)
+            render_markdown = settings.get('render_markdown', True)
+            self.render_markdown_checkbox.setChecked(render_markdown)
+
             if self.current_tabs_file:
                 self.update_window_title()
 
@@ -1200,6 +1233,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     # Add to content stack and tab list
                     self.content_stack.addWidget(tab)
                     tab_item = self.tab_list.add_tab(tab)
+                    self.apply_markdown_to_tab(tab)
 
                     # Set custom emoji and display name if they were saved
                     if custom_emoji:
