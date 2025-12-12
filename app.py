@@ -627,13 +627,23 @@ class TextEditorWindow(QMainWindow):
         for i in range(self.content_stack.count()):
             widget = self.content_stack.widget(i)
             if isinstance(widget, TextEditorTab):
+                was_modified = widget.is_modified
                 widget.text_edit.set_markdown_highlighting(enabled)
+                # Restore modified state (highlighting shouldn't count as modification)
+                if widget.is_modified != was_modified:
+                    widget.is_modified = was_modified
+                    self.tab_list.update_tab_display(widget)
 
     def apply_markdown_to_tab(self, tab):
         """Apply current markdown rendering setting to a tab"""
         if hasattr(self, 'render_markdown_checkbox'):
             enabled = self.render_markdown_checkbox.isChecked()
+            was_modified = tab.is_modified
             tab.text_edit.set_markdown_highlighting(enabled)
+            # Restore modified state (highlighting shouldn't count as modification)
+            if tab.is_modified != was_modified:
+                tab.is_modified = was_modified
+                self.tab_list.update_tab_display(tab)
 
     def edit_selected_emoji(self):
         """Edit the emoji and display name for the selected tab"""
