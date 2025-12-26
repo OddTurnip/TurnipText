@@ -237,21 +237,16 @@ class TextEditorWidget(QTextEdit):
         self.setTabStopDistance(tab_width)
 
     def set_markdown_highlighting(self, enabled):
-        """Enable or disable markdown syntax highlighting."""
+        """Enable or disable markdown syntax highlighting.
+
+        Note: Signal blocking is not needed here because TextEditorTab.on_text_changed()
+        compares actual text content against a saved baseline. Formatting changes from
+        the highlighter don't modify text content, so they won't trigger false positives.
+        """
         if enabled:
             if self.highlighter is None:
-                # Block signals on both widget and document to prevent textChanged
-                self.blockSignals(True)
-                self.document().blockSignals(True)
                 self.highlighter = MarkdownHighlighter(self.document())
-                self.document().blockSignals(False)
-                self.blockSignals(False)
         else:
             if self.highlighter is not None:
-                # Block signals during highlighter removal as well
-                self.blockSignals(True)
-                self.document().blockSignals(True)
                 self.highlighter.setDocument(None)
                 self.highlighter = None
-                self.document().blockSignals(False)
-                self.blockSignals(False)

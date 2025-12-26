@@ -364,4 +364,9 @@ class TestDialogBehavior:
         assert find_dialog.find_all_btn is not None
         assert find_dialog.replace_btn is not None
         assert find_dialog.replace_all_btn is not None
-        assert find_dialog.close_btn is not None
+        # Scope selection widgets
+        assert find_dialog.all_tabs_radio is not None
+        assert find_dialog.current_tab_radio is not None
+        assert find_dialog.tab_dropdown is not None
+        # Results table
+        assert find_dialog.results_table is not None
