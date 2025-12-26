@@ -488,13 +488,17 @@ class FindReplaceDialog(QDialog):
             self.results_table.setItem(row, 1, line_item)
 
             # Context - truncate long lines, highlight match position
-            context = self._format_context(
+            context_html = self._format_context(
                 result['line_text'],
                 result['match_start'],
                 result['match_len']
             )
-            context_item = QTableWidgetItem(context)
-            self.results_table.setItem(row, 2, context_item)
+            # Use QLabel for HTML rendering
+            from PyQt6.QtWidgets import QLabel
+            context_label = QLabel(context_html)
+            context_label.setTextFormat(Qt.TextFormat.RichText)
+            context_label.setStyleSheet("padding: 2px;")
+            self.results_table.setCellWidget(row, 2, context_label)
 
             # Replace button
             replace_btn = QPushButton("Replace")
@@ -502,7 +506,10 @@ class FindReplaceDialog(QDialog):
             self.results_table.setCellWidget(row, 3, replace_btn)
 
     def _format_context(self, line_text, match_start, match_len, max_context=60):
-        """Format line text with context around match, truncating if needed"""
+        """Format line text with context around match, truncating if needed.
+        Returns HTML with yellow-highlighted match."""
+        import html
+
         # Calculate how much context to show on each side
         half_context = (max_context - match_len) // 2
 
@@ -514,17 +521,26 @@ class FindReplaceDialog(QDialog):
         prefix = "..." if context_start > 0 else ""
         suffix = "..." if context_end < len(line_text) else ""
 
-        context = line_text[context_start:context_end].strip()
+        context = line_text[context_start:context_end]
 
-        # Add markers around the match within the context
-        adjusted_match_start = match_start - context_start
+        # Calculate how much leading whitespace to strip and adjust match position
+        stripped_context = context.lstrip()
+        leading_stripped = len(context) - len(stripped_context)
+        context = stripped_context.rstrip()
+
+        # Adjust match position for the stripped leading whitespace
+        adjusted_match_start = match_start - context_start - leading_stripped
+
+        # Build HTML with highlighted match
         if 0 <= adjusted_match_start < len(context):
-            before = context[:adjusted_match_start]
-            match = context[adjusted_match_start:adjusted_match_start + match_len]
-            after = context[adjusted_match_start + match_len:]
-            context = f"{before}[{match}]{after}"
+            before = html.escape(context[:adjusted_match_start])
+            match = html.escape(context[adjusted_match_start:adjusted_match_start + match_len])
+            after = html.escape(context[adjusted_match_start + match_len:])
+            context_html = f'{before}<span style="background-color: #FFFF00; font-weight: bold;">{match}</span>{after}'
+        else:
+            context_html = html.escape(context)
 
-        return f"{prefix}{context}{suffix}"
+        return f"{prefix}{context_html}{suffix}"
 
     def _on_result_double_click(self, index):
         """Handle double-click on a result row - navigate to that match"""
