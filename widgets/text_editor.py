@@ -246,6 +246,11 @@ class TextEditorWidget(QPlainTextEdit):
         self._external_selections = []  # For find/replace highlights
         self._line_numbers_visible = True  # Track line number visibility
 
+        # Set monospace font for the editor
+        editor_font = QFont("Consolas", 11)
+        editor_font.setStyleHint(QFont.StyleHint.Monospace)
+        self.setFont(editor_font)
+
         # Create line number area
         self.line_number_area = LineNumberArea(self)
 

@@ -1033,7 +1033,7 @@ class TextEditorWindow(QMainWindow):
 
         fonts_text = QLabel("""
 <b>Line numbers:</b> Calibri<br>
-<b>Editor:</b> System default monospace
+<b>Editor:</b> Consolas
         """)
         layout.addWidget(fonts_text)
 
