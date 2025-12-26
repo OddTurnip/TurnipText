@@ -42,6 +42,7 @@ class TextEditorWindow(QMainWindow):
         self.file_watcher = QFileSystemWatcher(self)
         self.file_watcher.fileChanged.connect(self._on_file_changed)
         self._pending_reload_files = set()  # Track files pending reload prompt
+        self._saving_files = set()  # Track files being saved internally (to ignore watcher)
 
         self.init_ui()
         self.load_settings()
@@ -525,6 +526,7 @@ class TextEditorWindow(QMainWindow):
 
         if tab.file_path:
             # File already has a path, just save
+            self._saving_files.add(tab.file_path)
             tab.save_file()
             self.tab_list.update_tab_display(tab)
             # Update Save All button in case all files are now saved
@@ -547,7 +549,9 @@ class TextEditorWindow(QMainWindow):
                 # Update last folder
                 self.last_file_folder = os.path.dirname(file_path)
 
+                self._saving_files.add(file_path)
                 tab.save_file(file_path)
+                self._watch_file(file_path)  # Start watching the new file
                 self.tab_list.update_tab_display(tab)
                 # Update Save All button in case all files are now saved
                 self.update_save_all_button()
@@ -560,6 +564,7 @@ class TextEditorWindow(QMainWindow):
             widget = self.content_stack.widget(i)
             if isinstance(widget, TextEditorTab) and widget.is_modified:
                 if widget.file_path:
+                    self._saving_files.add(widget.file_path)
                     widget.save_file()
                     self.tab_list.update_tab_display(widget)
                     saved_count += 1
@@ -671,6 +676,13 @@ class TextEditorWindow(QMainWindow):
 
     def _on_file_changed(self, file_path):
         """Handle file changed notification from file system watcher"""
+        # Ignore changes from our own save operations
+        if file_path in self._saving_files:
+            self._saving_files.discard(file_path)
+            # Re-add to watcher (file changes remove it on some systems)
+            self._watch_file(file_path)
+            return
+
         # Avoid duplicate prompts
         if file_path in self._pending_reload_files:
             return
