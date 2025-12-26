@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextDocument, QTextCursor, QColor, QBrush, QTextCharFormat
 
+import html
 import os
 
 
@@ -494,7 +495,6 @@ class FindReplaceDialog(QDialog):
                 result['match_len']
             )
             # Use QLabel for HTML rendering
-            from PyQt6.QtWidgets import QLabel
             context_label = QLabel(context_html)
             context_label.setTextFormat(Qt.TextFormat.RichText)
             context_label.setStyleSheet("padding: 2px;")
@@ -508,8 +508,6 @@ class FindReplaceDialog(QDialog):
     def _format_context(self, line_text, match_start, match_len, max_context=60):
         """Format line text with context around match, truncating if needed.
         Returns HTML with yellow-highlighted match."""
-        import html
-
         # Calculate how much context to show on each side
         half_context = (max_context - match_len) // 2
 
