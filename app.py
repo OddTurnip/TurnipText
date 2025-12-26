@@ -295,6 +295,13 @@ class TextEditorWindow(QMainWindow):
         self.render_markdown_checkbox.stateChanged.connect(self.toggle_markdown_rendering)
         toolbar_row2.addWidget(self.render_markdown_checkbox)
 
+        # Line Numbers checkbox
+        self.line_numbers_checkbox = QCheckBox("Line Numbers")
+        self.line_numbers_checkbox.setToolTip("Show line numbers and highlight current line")
+        self.line_numbers_checkbox.setChecked(True)  # Default to checked
+        self.line_numbers_checkbox.stateChanged.connect(self.toggle_line_numbers)
+        toolbar_row2.addWidget(self.line_numbers_checkbox)
+
         # Add stretch to push buttons to the left
         toolbar_row2.addStretch()
 
@@ -347,6 +354,7 @@ class TextEditorWindow(QMainWindow):
         self.content_stack.addWidget(tab)
         self.tab_list.add_tab(tab)
         self.apply_markdown_to_tab(tab)
+        self.apply_line_numbers_to_tab(tab)
         self.switch_to_tab(tab)
 
     def load_file(self):
@@ -413,6 +421,7 @@ class TextEditorWindow(QMainWindow):
                 self.content_stack.addWidget(tab)
                 self.tab_list.add_tab(tab)
                 self.apply_markdown_to_tab(tab)
+                self.apply_line_numbers_to_tab(tab)
                 self._watch_file(file_path)
                 self.switch_to_tab(tab)
         except Exception as e:
@@ -782,6 +791,20 @@ class TextEditorWindow(QMainWindow):
         if hasattr(self, 'render_markdown_checkbox'):
             enabled = self.render_markdown_checkbox.isChecked()
             tab.text_edit.set_markdown_highlighting(enabled)
+
+    def toggle_line_numbers(self, state):
+        """Toggle line numbers and current line highlighting on all tabs."""
+        enabled = state == Qt.CheckState.Checked.value
+        for i in range(self.content_stack.count()):
+            widget = self.content_stack.widget(i)
+            if isinstance(widget, TextEditorTab):
+                widget.text_edit.set_line_numbers_visible(enabled)
+
+    def apply_line_numbers_to_tab(self, tab):
+        """Apply current line numbers setting to a tab."""
+        if hasattr(self, 'line_numbers_checkbox'):
+            enabled = self.line_numbers_checkbox.isChecked()
+            tab.text_edit.set_line_numbers_visible(enabled)
 
     def edit_selected_emoji(self):
         """Edit the emoji and display name for the selected tab"""
@@ -1219,6 +1242,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     self.content_stack.addWidget(tab)
                     tab_item = self.tab_list.add_tab(tab)
                     self.apply_markdown_to_tab(tab)
+                    self.apply_line_numbers_to_tab(tab)
                     self._watch_file(file_path)
 
                     # Set custom emoji and display name if they were saved
@@ -1261,7 +1285,8 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             'last_tabs_folder': self.last_tabs_folder,
             'current_tabs_file': self.current_tabs_file,
             'view_mode': self.tab_list.view_mode,
-            'render_markdown': self.render_markdown_checkbox.isChecked()
+            'render_markdown': self.render_markdown_checkbox.isChecked(),
+            'line_numbers': self.line_numbers_checkbox.isChecked()
         }
 
         # Auto-save current session
@@ -1345,6 +1370,10 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             render_markdown = settings.get('render_markdown', True)
             self.render_markdown_checkbox.setChecked(render_markdown)
 
+            # Restore line numbers preference (default to True)
+            line_numbers = settings.get('line_numbers', True)
+            self.line_numbers_checkbox.setChecked(line_numbers)
+
             if self.current_tabs_file:
                 self.update_window_title()
 
@@ -1383,6 +1412,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     self.content_stack.addWidget(tab)
                     tab_item = self.tab_list.add_tab(tab)
                     self.apply_markdown_to_tab(tab)
+                    self.apply_line_numbers_to_tab(tab)
                     self._watch_file(file_path)
 
                     # Set custom emoji and display name if they were saved

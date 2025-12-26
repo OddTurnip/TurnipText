@@ -244,6 +244,7 @@ class TextEditorWidget(QPlainTextEdit):
         super().__init__(parent)
         self.highlighter = None
         self._external_selections = []  # For find/replace highlights
+        self._line_numbers_visible = True  # Track line number visibility
 
         # Create line number area
         self.line_number_area = LineNumberArea(self)
@@ -264,6 +265,9 @@ class TextEditorWidget(QPlainTextEdit):
 
     def line_number_area_width(self):
         """Calculate the width needed for the line number area."""
+        if not self._line_numbers_visible:
+            return 0
+
         digits = 1
         max_num = max(1, self.blockCount())
         while max_num >= 10:
@@ -300,8 +304,8 @@ class TextEditorWidget(QPlainTextEdit):
         """Highlight the line where the cursor is, preserving external selections."""
         extra_selections = []
 
-        # Add current line highlight (only if no external selections like search results)
-        if not self.isReadOnly() and not self._external_selections:
+        # Add current line highlight (only if visible and no external selections like search results)
+        if self._line_numbers_visible and not self.isReadOnly() and not self._external_selections:
             selection = QTextEdit.ExtraSelection()
             line_color = QColor(Qt.GlobalColor.yellow).lighter(180)
             selection.format.setBackground(line_color)
@@ -366,3 +370,10 @@ class TextEditorWidget(QPlainTextEdit):
             if self.highlighter is not None:
                 self.highlighter.setDocument(None)
                 self.highlighter = None
+
+    def set_line_numbers_visible(self, visible):
+        """Show or hide line numbers and current line highlighting."""
+        self._line_numbers_visible = visible
+        self.line_number_area.setVisible(visible)
+        self.update_line_number_area_width(0)
+        self.highlight_current_line()
