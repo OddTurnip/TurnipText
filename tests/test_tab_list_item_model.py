@@ -213,6 +213,79 @@ class TestContentManagement:
         assert tab.get_content() == content
 
 
+class TestMarkdownHighlighting:
+    """Test that markdown highlighting doesn't affect modification state"""
+
+    def test_markdown_toggle_no_spurious_modification(self, qapp, qtbot):
+        """Test that toggling markdown highlighting doesn't mark tab as modified"""
+        tab = TextEditorTab()
+        tab.set_content('# Header\n\nSome **bold** and *italic* text.')
+        assert tab.is_modified is False
+
+        # Enable markdown highlighting
+        tab.text_edit.set_markdown_highlighting(True)
+        qtbot.wait(50)  # Wait for any deferred highlighting
+
+        assert tab.is_modified is False, "Enabling highlighting shouldn't mark as modified"
+
+        # Disable markdown highlighting
+        tab.text_edit.set_markdown_highlighting(False)
+        qtbot.wait(50)  # Wait for any deferred operations
+
+        assert tab.is_modified is False, "Disabling highlighting shouldn't mark as modified"
+
+        # Toggle on and off again (the bug scenario)
+        tab.text_edit.set_markdown_highlighting(True)
+        qtbot.wait(50)
+        tab.text_edit.set_markdown_highlighting(False)
+        qtbot.wait(50)
+        tab.text_edit.set_markdown_highlighting(True)
+        qtbot.wait(50)
+
+        assert tab.is_modified is False, "Multiple toggles shouldn't mark as modified"
+
+    def test_markdown_toggle_preserves_real_modifications(self, qapp, qtbot):
+        """Test that real modifications are preserved when toggling markdown"""
+        tab = TextEditorTab()
+        tab.set_content('Original content')
+        assert tab.is_modified is False
+
+        # Make a real modification
+        tab.text_edit.setPlainText('Modified content')
+        qtbot.wait(10)
+        assert tab.is_modified is True
+
+        # Toggle markdown highlighting
+        tab.text_edit.set_markdown_highlighting(True)
+        qtbot.wait(50)
+
+        assert tab.is_modified is True, "Real modification should be preserved"
+
+        tab.text_edit.set_markdown_highlighting(False)
+        qtbot.wait(50)
+
+        assert tab.is_modified is True, "Real modification should still be preserved"
+
+    def test_undo_restores_unmodified_state(self, qapp, qtbot):
+        """Test that undoing changes correctly updates modified state"""
+        tab = TextEditorTab()
+        original = 'Original content'
+        tab.set_content(original)
+        assert tab.is_modified is False
+
+        # Make a modification
+        tab.text_edit.setPlainText('Modified content')
+        qtbot.wait(10)
+        assert tab.is_modified is True
+
+        # Undo to restore original content
+        tab.text_edit.setPlainText(original)
+        qtbot.wait(10)
+
+        # Content matches saved baseline, so should be unmodified
+        assert tab.is_modified is False, "Matching original content should be unmodified"
+
+
 class TestPinningState:
     """Test tab pinning functionality"""
 
