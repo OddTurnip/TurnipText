@@ -424,8 +424,9 @@ class TextEditorWindow(QMainWindow):
         if self.find_replace_dialog is None:
             self.find_replace_dialog = FindReplaceDialog(current_tab.text_edit, self)
         else:
-            # Update the text edit reference to current tab
-            self.find_replace_dialog.text_edit = current_tab.text_edit
+            # Update the text edit reference and refresh tab list
+            self.find_replace_dialog.update_current_tab(current_tab)
+            self.find_replace_dialog.refresh_tab_list()
 
         # Show dialog
         self.find_replace_dialog.show()
@@ -609,6 +610,9 @@ class TextEditorWindow(QMainWindow):
         """Switch to a specific tab"""
         if isinstance(tab, TextEditorTab):
             self.content_stack.setCurrentWidget(tab)
+            # Notify Find & Replace dialog about the tab switch
+            if self.find_replace_dialog and self.find_replace_dialog.isVisible():
+                self.find_replace_dialog.update_current_tab(tab)
 
     def set_tab_view_mode(self, mode):
         """Set the view mode for the tab list"""
