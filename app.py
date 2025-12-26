@@ -272,7 +272,7 @@ class TextEditorWindow(QMainWindow):
         toolbar_row2.addWidget(self.edit_emoji_btn)
 
         # Find and Replace button
-        self.find_replace_btn = QPushButton("🔍 Find & Replace")
+        self.find_replace_btn = QPushButton("🔍 Find && Replace")
         self.find_replace_btn.setToolTip("Find and replace text (Ctrl+F)")
         self.find_replace_btn.clicked.connect(self.show_find_replace)
         toolbar_row2.addWidget(self.find_replace_btn)
