@@ -302,6 +302,13 @@ class TextEditorWindow(QMainWindow):
         self.line_numbers_checkbox.stateChanged.connect(self.toggle_line_numbers)
         toolbar_row2.addWidget(self.line_numbers_checkbox)
 
+        # Monospace checkbox
+        self.monospace_checkbox = QCheckBox("Monospace")
+        self.monospace_checkbox.setToolTip("Use monospace font (Consolas) for editing")
+        self.monospace_checkbox.setChecked(False)  # Default to unchecked (use system default)
+        self.monospace_checkbox.stateChanged.connect(self.toggle_monospace_font)
+        toolbar_row2.addWidget(self.monospace_checkbox)
+
         # Add stretch to push buttons to the left
         toolbar_row2.addStretch()
 
@@ -355,6 +362,7 @@ class TextEditorWindow(QMainWindow):
         self.tab_list.add_tab(tab)
         self.apply_markdown_to_tab(tab)
         self.apply_line_numbers_to_tab(tab)
+        self.apply_monospace_to_tab(tab)
         self.switch_to_tab(tab)
 
     def load_file(self):
@@ -422,6 +430,7 @@ class TextEditorWindow(QMainWindow):
                 self.tab_list.add_tab(tab)
                 self.apply_markdown_to_tab(tab)
                 self.apply_line_numbers_to_tab(tab)
+                self.apply_monospace_to_tab(tab)
                 self._watch_file(file_path)
                 self.switch_to_tab(tab)
         except Exception as e:
@@ -806,6 +815,20 @@ class TextEditorWindow(QMainWindow):
             enabled = self.line_numbers_checkbox.isChecked()
             tab.text_edit.set_line_numbers_visible(enabled)
 
+    def toggle_monospace_font(self, state):
+        """Toggle monospace font on all tabs."""
+        enabled = state == Qt.CheckState.Checked.value
+        for i in range(self.content_stack.count()):
+            widget = self.content_stack.widget(i)
+            if isinstance(widget, TextEditorTab):
+                widget.text_edit.set_monospace_font(enabled)
+
+    def apply_monospace_to_tab(self, tab):
+        """Apply current monospace font setting to a tab."""
+        if hasattr(self, 'monospace_checkbox'):
+            enabled = self.monospace_checkbox.isChecked()
+            tab.text_edit.set_monospace_font(enabled)
+
     def edit_selected_emoji(self):
         """Edit the emoji and display name for the selected tab"""
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QCheckBox
@@ -1033,7 +1056,7 @@ class TextEditorWindow(QMainWindow):
 
         fonts_text = QLabel("""
 <b>Line numbers:</b> Calibri<br>
-<b>Editor:</b> Consolas
+<b>Editor:</b> System default (or Consolas with Monospace checkbox)
         """)
         layout.addWidget(fonts_text)
 
@@ -1258,6 +1281,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     tab_item = self.tab_list.add_tab(tab)
                     self.apply_markdown_to_tab(tab)
                     self.apply_line_numbers_to_tab(tab)
+                    self.apply_monospace_to_tab(tab)
                     self._watch_file(file_path)
 
                     # Set custom emoji and display name if they were saved
@@ -1301,7 +1325,8 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             'current_tabs_file': self.current_tabs_file,
             'view_mode': self.tab_list.view_mode,
             'render_markdown': self.render_markdown_checkbox.isChecked(),
-            'line_numbers': self.line_numbers_checkbox.isChecked()
+            'line_numbers': self.line_numbers_checkbox.isChecked(),
+            'monospace': self.monospace_checkbox.isChecked()
         }
 
         # Auto-save current session
@@ -1389,6 +1414,10 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             line_numbers = settings.get('line_numbers', True)
             self.line_numbers_checkbox.setChecked(line_numbers)
 
+            # Restore monospace font preference (default to False)
+            monospace = settings.get('monospace', False)
+            self.monospace_checkbox.setChecked(monospace)
+
             if self.current_tabs_file:
                 self.update_window_title()
 
@@ -1428,6 +1457,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     tab_item = self.tab_list.add_tab(tab)
                     self.apply_markdown_to_tab(tab)
                     self.apply_line_numbers_to_tab(tab)
+                    self.apply_monospace_to_tab(tab)
                     self._watch_file(file_path)
 
                     # Set custom emoji and display name if they were saved

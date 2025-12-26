@@ -245,11 +245,7 @@ class TextEditorWidget(QPlainTextEdit):
         self.highlighter = None
         self._external_selections = []  # For find/replace highlights
         self._line_numbers_visible = True  # Track line number visibility
-
-        # Set monospace font for the editor
-        editor_font = QFont("Consolas", 11)
-        editor_font.setStyleHint(QFont.StyleHint.Monospace)
-        self.setFont(editor_font)
+        self._monospace_enabled = False  # Track monospace font state
 
         # Create line number area
         self.line_number_area = LineNumberArea(self)
@@ -390,3 +386,18 @@ class TextEditorWidget(QPlainTextEdit):
         self.line_number_area.setVisible(visible)
         self.update_line_number_area_width(0)
         self.highlight_current_line()
+
+    def set_monospace_font(self, enabled):
+        """Toggle between monospace (Consolas) and system default font."""
+        self._monospace_enabled = enabled
+        if enabled:
+            editor_font = QFont("Consolas", 11)
+            editor_font.setStyleHint(QFont.StyleHint.Monospace)
+        else:
+            editor_font = QFont()  # System default
+            editor_font.setPointSize(11)
+        self.setFont(editor_font)
+        # Update tab width for new font
+        font_metrics = QFontMetrics(self.font())
+        tab_width = 4 * font_metrics.horizontalAdvance(' ')
+        self.setTabStopDistance(tab_width)
