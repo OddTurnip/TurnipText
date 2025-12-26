@@ -394,8 +394,7 @@ class TextEditorWidget(QPlainTextEdit):
             editor_font = QFont("Consolas", 11)
             editor_font.setStyleHint(QFont.StyleHint.Monospace)
         else:
-            editor_font = QFont()  # System default
-            editor_font.setPointSize(11)
+            editor_font = QFont()  # System default (no size override)
         self.setFont(editor_font)
         # Update tab width for new font
         font_metrics = QFontMetrics(self.font())
