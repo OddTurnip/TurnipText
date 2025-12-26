@@ -1018,9 +1018,24 @@ class TextEditorWindow(QMainWindow):
   <tr><td><b>Ctrl+O</b></td><td>Open file</td></tr>
   <tr><td><b>Ctrl+S</b></td><td>Save current tab</td></tr>
   <tr><td><b>Ctrl+Shift+S</b></td><td>Save all files</td></tr>
+  <tr><td><b>Ctrl+F</b></td><td>Find &amp; Replace</td></tr>
+  <tr><td><b>Ctrl+H</b></td><td>Find &amp; Replace</td></tr>
+  <tr><td><b>Ctrl+I</b></td><td>Document statistics</td></tr>
+  <tr><td><b>Ctrl+Z</b></td><td>Undo</td></tr>
+  <tr><td><b>Ctrl+Y</b></td><td>Redo</td></tr>
 </table>
         """)
         layout.addWidget(shortcuts_text)
+
+        # Fonts section
+        fonts_label = QLabel("<h3>Fonts</h3>")
+        layout.addWidget(fonts_label)
+
+        fonts_text = QLabel("""
+<b>Line numbers:</b> Calibri<br>
+<b>Editor:</b> System default monospace
+        """)
+        layout.addWidget(fonts_text)
 
         # About section
         about_label = QLabel("<h3>About</h3>")

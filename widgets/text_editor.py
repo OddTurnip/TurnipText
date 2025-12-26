@@ -274,9 +274,11 @@ class TextEditorWidget(QPlainTextEdit):
             max_num //= 10
             digits += 1
 
-        # Minimum 3 digits width, plus padding
+        # Minimum 3 digits width, plus padding (left + right)
         digits = max(3, digits)
-        space = 10 + self.fontMetrics().horizontalAdvance('9') * digits
+        left_padding = 8
+        right_padding = 12
+        space = left_padding + self.fontMetrics().horizontalAdvance('9') * digits + right_padding
         return space
 
     def update_line_number_area_width(self, _):
@@ -338,16 +340,22 @@ class TextEditorWidget(QPlainTextEdit):
         painter = QPainter(self.line_number_area)
         painter.fillRect(event.rect(), QColor("#F0F0F0"))
 
+        # Use Calibri font for line numbers
+        line_number_font = QFont("Calibri", 10)
+        painter.setFont(line_number_font)
+
         block = self.firstVisibleBlock()
         block_number = block.blockNumber()
         top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
         bottom = top + int(self.blockBoundingRect(block).height())
 
+        right_padding = 12  # Padding to the right of line numbers
+
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
                 number = str(block_number + 1)
                 painter.setPen(QColor("#808080"))
-                painter.drawText(0, top, self.line_number_area.width() - 5,
+                painter.drawText(0, top, self.line_number_area.width() - right_padding,
                                 self.fontMetrics().height(),
                                 Qt.AlignmentFlag.AlignRight, number)
 
