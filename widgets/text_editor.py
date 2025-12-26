@@ -1,12 +1,15 @@
 """
 Main text editing widget.
-Currently a simple wrapper around QTextEdit.
-Includes markdown syntax highlighting support.
+Enhanced QPlainTextEdit with line numbers and markdown highlighting.
 """
 
 import re
-from PyQt6.QtWidgets import QTextEdit
-from PyQt6.QtGui import QFontMetrics, QSyntaxHighlighter, QTextCharFormat, QColor, QFont
+from PyQt6.QtWidgets import QPlainTextEdit, QWidget, QTextEdit
+from PyQt6.QtGui import (
+    QFontMetrics, QSyntaxHighlighter, QTextCharFormat, QColor, QFont,
+    QPainter, QTextFormat
+)
+from PyQt6.QtCore import QRect, QSize, Qt
 
 
 class MarkdownHighlighter(QSyntaxHighlighter):
@@ -213,28 +216,141 @@ class MarkdownHighlighter(QSyntaxHighlighter):
                 pos += 1
 
 
-class TextEditorWidget(QTextEdit):
-    """
-    Enhanced text editor widget.
+class LineNumberArea(QWidget):
+    """Widget for displaying line numbers alongside text editor."""
 
-    Currently wraps QTextEdit with tab width configuration.
-    Supports:
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.editor = editor
+
+    def sizeHint(self):
+        return QSize(self.editor.line_number_area_width(), 0)
+
+    def paintEvent(self, event):
+        self.editor.line_number_area_paint_event(event)
+
+
+class TextEditorWidget(QPlainTextEdit):
+    """
+    Enhanced text editor widget with line numbers.
+
+    Features:
+    - Line numbers in left margin
     - Markdown syntax highlighting (toggleable)
-    - Line numbers (future)
-    - Code folding (future)
+    - Tab width configuration
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.highlighter = None
+        self._external_selections = []  # For find/replace highlights
 
-        # Configure as plain text editor
-        self.setAcceptRichText(False)
+        # Create line number area
+        self.line_number_area = LineNumberArea(self)
+
+        # Connect signals for line number updates
+        self.blockCountChanged.connect(self.update_line_number_area_width)
+        self.updateRequest.connect(self.update_line_number_area)
+        self.cursorPositionChanged.connect(self.highlight_current_line)
+
+        # Initialize line number area width
+        self.update_line_number_area_width(0)
+        self.highlight_current_line()
 
         # Set tab stop width to 4 spaces
         font_metrics = QFontMetrics(self.font())
         tab_width = 4 * font_metrics.horizontalAdvance(' ')
         self.setTabStopDistance(tab_width)
+
+    def line_number_area_width(self):
+        """Calculate the width needed for the line number area."""
+        digits = 1
+        max_num = max(1, self.blockCount())
+        while max_num >= 10:
+            max_num //= 10
+            digits += 1
+
+        # Minimum 3 digits width, plus padding
+        digits = max(3, digits)
+        space = 10 + self.fontMetrics().horizontalAdvance('9') * digits
+        return space
+
+    def update_line_number_area_width(self, _):
+        """Update the viewport margins to accommodate line numbers."""
+        self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
+
+    def update_line_number_area(self, rect, dy):
+        """Update the line number area when scrolling or editing."""
+        if dy:
+            self.line_number_area.scroll(0, dy)
+        else:
+            self.line_number_area.update(0, rect.y(), self.line_number_area.width(), rect.height())
+
+        if rect.contains(self.viewport().rect()):
+            self.update_line_number_area_width(0)
+
+    def resizeEvent(self, event):
+        """Handle resize to adjust line number area."""
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self.line_number_area.setGeometry(QRect(cr.left(), cr.top(),
+                                                 self.line_number_area_width(), cr.height()))
+
+    def highlight_current_line(self):
+        """Highlight the line where the cursor is, preserving external selections."""
+        extra_selections = []
+
+        # Add current line highlight (only if no external selections like search results)
+        if not self.isReadOnly() and not self._external_selections:
+            selection = QTextEdit.ExtraSelection()
+            line_color = QColor(Qt.GlobalColor.yellow).lighter(180)
+            selection.format.setBackground(line_color)
+            selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            extra_selections.append(selection)
+
+        # Add any external selections (from find/replace)
+        extra_selections.extend(self._external_selections)
+
+        self.setExtraSelections(extra_selections)
+
+    def setExtraSelections(self, selections):
+        """Override to track external selections."""
+        # Check if this is being called from outside (not from highlight_current_line)
+        # by checking if we're in the highlight_current_line call stack
+        import inspect
+        caller = inspect.stack()[1].function
+        if caller != 'highlight_current_line':
+            self._external_selections = selections
+            # Merge with current line highlight
+            self.highlight_current_line()
+        else:
+            # Called from highlight_current_line, just set directly
+            super().setExtraSelections(selections)
+
+    def line_number_area_paint_event(self, event):
+        """Paint the line numbers."""
+        painter = QPainter(self.line_number_area)
+        painter.fillRect(event.rect(), QColor("#F0F0F0"))
+
+        block = self.firstVisibleBlock()
+        block_number = block.blockNumber()
+        top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
+        bottom = top + int(self.blockBoundingRect(block).height())
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                number = str(block_number + 1)
+                painter.setPen(QColor("#808080"))
+                painter.drawText(0, top, self.line_number_area.width() - 5,
+                                self.fontMetrics().height(),
+                                Qt.AlignmentFlag.AlignRight, number)
+
+            block = block.next()
+            top = bottom
+            bottom = top + int(self.blockBoundingRect(block).height())
+            block_number += 1
 
     def set_markdown_highlighting(self, enabled):
         """Enable or disable markdown syntax highlighting.

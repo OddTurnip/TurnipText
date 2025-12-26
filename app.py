@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QSplitter, QStackedWidget,
     QLabel, QFrame, QDialog, QLineEdit, QCheckBox
 )
-from PyQt6.QtCore import Qt, QSize, QDateTime
+from PyQt6.QtCore import Qt, QSize, QDateTime, QFileSystemWatcher
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence, QIcon, QGuiApplication
 
 from constants import TAB_WIDTH_MINIMIZED, TAB_WIDTH_NORMAL, TAB_WIDTH_MAXIMIZED, MIN_SPLITTER_WIDTH
@@ -37,6 +37,11 @@ class TextEditorWindow(QMainWindow):
         self.tabs_metadata_modified = False  # Track if tab metadata (emoji/display name) has changed
         self._initial_splitter_set = False  # Track if initial splitter position has been applied
         self.find_replace_dialog = None  # Will be created when first needed
+
+        # File system watcher for detecting external changes
+        self.file_watcher = QFileSystemWatcher(self)
+        self.file_watcher.fileChanged.connect(self._on_file_changed)
+        self._pending_reload_files = set()  # Track files pending reload prompt
 
         self.init_ui()
         self.load_settings()
@@ -118,6 +123,9 @@ class TextEditorWindow(QMainWindow):
 
         # Ctrl+H - Find and Replace
         QShortcut(QKeySequence("Ctrl+H"), self).activated.connect(self.show_find_replace)
+
+        # Ctrl+I - Document Info/Statistics
+        QShortcut(QKeySequence("Ctrl+I"), self).activated.connect(self.show_document_stats)
 
     def create_button_toolbar(self, layout):
         """Create button toolbar with file operations"""
@@ -405,6 +413,7 @@ class TextEditorWindow(QMainWindow):
                 self.content_stack.addWidget(tab)
                 self.tab_list.add_tab(tab)
                 self.apply_markdown_to_tab(tab)
+                self._watch_file(file_path)
                 self.switch_to_tab(tab)
         except Exception as e:
             print(f"ERROR in load_file: {e}")
@@ -432,6 +441,58 @@ class TextEditorWindow(QMainWindow):
         self.find_replace_dialog.show()
         self.find_replace_dialog.raise_()
         self.find_replace_dialog.activateWindow()
+
+    def show_document_stats(self):
+        """Show document statistics dialog (Ctrl+I)"""
+        import re
+
+        current_tab = self.get_current_tab()
+        if not current_tab:
+            QMessageBox.information(self, "No File", "Please open a file first.")
+            return
+
+        text = current_tab.get_content()
+
+        # Calculate statistics
+        char_count = len(text)
+        char_no_spaces = len(text.replace(' ', '').replace('\n', '').replace('\t', ''))
+
+        # Word count - split on whitespace
+        words = text.split()
+        word_count = len(words)
+
+        # Line count
+        lines = text.split('\n')
+        line_count = len(lines)
+
+        # Paragraph count - separated by blank lines
+        paragraphs = re.split(r'\n\s*\n', text.strip())
+        paragraph_count = len([p for p in paragraphs if p.strip()])
+
+        # Sentence count - split on . ! ? followed by space or end
+        sentences = re.split(r'[.!?]+(?:\s|$)', text)
+        sentence_count = len([s for s in sentences if s.strip()])
+
+        # Get file name
+        file_name = os.path.basename(current_tab.file_path) if current_tab.file_path else "Untitled"
+
+        # Build message
+        stats_message = f"""<b>{file_name}</b><br><br>
+<table>
+<tr><td><b>Characters:</b></td><td align="right">{char_count:,}</td></tr>
+<tr><td><b>Characters (no spaces):</b></td><td align="right">{char_no_spaces:,}</td></tr>
+<tr><td><b>Words:</b></td><td align="right">{word_count:,}</td></tr>
+<tr><td><b>Lines:</b></td><td align="right">{line_count:,}</td></tr>
+<tr><td><b>Paragraphs:</b></td><td align="right">{paragraph_count:,}</td></tr>
+<tr><td><b>Sentences:</b></td><td align="right">{sentence_count:,}</td></tr>
+</table>"""
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Document Statistics")
+        msg.setTextFormat(Qt.TextFormat.RichText)
+        msg.setText(stats_message)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.exec()
 
     def save_current_tab(self):
         """Save the currently active tab"""
@@ -570,10 +631,85 @@ class TextEditorWindow(QMainWindow):
             elif reply == QMessageBox.StandardButton.Cancel:
                 return
 
+        # Remove from file watcher
+        if widget.file_path:
+            self._unwatch_file(widget.file_path)
+
         # Remove from tab list and content stack
         self.tab_list.remove_tab(widget)
         self.content_stack.removeWidget(widget)
         widget.deleteLater()
+
+    def _watch_file(self, file_path):
+        """Add a file to the file system watcher"""
+        if file_path and os.path.exists(file_path):
+            if file_path not in self.file_watcher.files():
+                self.file_watcher.addPath(file_path)
+
+    def _unwatch_file(self, file_path):
+        """Remove a file from the file system watcher"""
+        if file_path and file_path in self.file_watcher.files():
+            self.file_watcher.removePath(file_path)
+
+    def _on_file_changed(self, file_path):
+        """Handle file changed notification from file system watcher"""
+        # Avoid duplicate prompts
+        if file_path in self._pending_reload_files:
+            return
+
+        # Find the tab for this file
+        tab = None
+        for i in range(self.content_stack.count()):
+            widget = self.content_stack.widget(i)
+            if isinstance(widget, TextEditorTab) and widget.file_path == file_path:
+                tab = widget
+                break
+
+        if not tab:
+            return
+
+        # Check if the file still exists
+        if not os.path.exists(file_path):
+            # File was deleted
+            QMessageBox.warning(
+                self,
+                "File Deleted",
+                f"'{os.path.basename(file_path)}' has been deleted externally.\n"
+                "The file will be marked as unsaved."
+            )
+            tab.is_modified = True
+            self.tab_list.update_tab_display(tab)
+            self._unwatch_file(file_path)
+            return
+
+        # File was modified - prompt to reload
+        self._pending_reload_files.add(file_path)
+        file_name = os.path.basename(file_path)
+
+        reply = QMessageBox.question(
+            self,
+            "File Changed",
+            f"'{file_name}' has been modified externally.\n\n"
+            "Do you want to reload it?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        self._pending_reload_files.discard(file_path)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Reload the file
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                tab._saved_content = content
+                tab.text_edit.setPlainText(content)
+                tab.is_modified = False
+                self.tab_list.update_tab_display(tab)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to reload file:\n{str(e)}")
+
+        # Re-add to watcher (file changes remove it on some systems)
+        self._watch_file(file_path)
 
     def toggle_pin(self, widget):
         """Toggle pin status of a tab"""
@@ -1083,6 +1219,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     self.content_stack.addWidget(tab)
                     tab_item = self.tab_list.add_tab(tab)
                     self.apply_markdown_to_tab(tab)
+                    self._watch_file(file_path)
 
                     # Set custom emoji and display name if they were saved
                     if custom_emoji:
@@ -1246,6 +1383,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     self.content_stack.addWidget(tab)
                     tab_item = self.tab_list.add_tab(tab)
                     self.apply_markdown_to_tab(tab)
+                    self._watch_file(file_path)
 
                     # Set custom emoji and display name if they were saved
                     if custom_emoji:

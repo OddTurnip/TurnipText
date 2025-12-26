@@ -367,6 +367,75 @@ class TestDialogBehavior:
         # Scope selection widgets
         assert find_dialog.all_tabs_radio is not None
         assert find_dialog.current_tab_radio is not None
+        assert find_dialog.selection_radio is not None
         assert find_dialog.tab_dropdown is not None
         # Results table
         assert find_dialog.results_table is not None
+        # Regex widgets
+        assert find_dialog.regex_cb is not None
+        assert find_dialog.regex_info_btn is not None
+
+
+class TestRegexSupport:
+    """Test regex search functionality"""
+
+    def test_regex_checkbox_disables_whole_words(self, find_dialog):
+        """Test that enabling regex disables whole words"""
+        assert find_dialog.whole_words_cb.isEnabled()
+        find_dialog.regex_cb.setChecked(True)
+        assert not find_dialog.whole_words_cb.isEnabled()
+        find_dialog.regex_cb.setChecked(False)
+        assert find_dialog.whole_words_cb.isEnabled()
+
+    def test_regex_find_basic(self, find_dialog):
+        """Test basic regex pattern matching"""
+        find_dialog.regex_cb.setChecked(True)
+        find_dialog.find_input.setText(r"\d+")  # Match digits
+        find_dialog.find_all()
+
+        # Sample text doesn't have digits, so should find 0
+        assert len(find_dialog.all_matches) == 0
+
+    def test_regex_find_word_boundary(self, find_dialog, text_edit):
+        """Test regex word boundary matching"""
+        text_edit.setPlainText("The quick fox, quicker rabbit, quickest bird")
+        find_dialog.regex_cb.setChecked(True)
+        find_dialog.find_input.setText(r"\bquick\b")
+        find_dialog.find_all()
+
+        # Should only find "quick" as whole word
+        assert len(find_dialog.all_matches) == 1
+
+    def test_regex_replace_with_groups(self, find_dialog, text_edit):
+        """Test regex replace with capture groups"""
+        text_edit.setPlainText("hello world")
+        find_dialog.regex_cb.setChecked(True)
+        find_dialog.find_input.setText(r"(hello) (world)")
+        find_dialog.replace_input.setText(r"\2 \1")
+        find_dialog.replace_all()
+
+        assert text_edit.toPlainText() == "world hello"
+
+    def test_regex_invalid_pattern(self, find_dialog):
+        """Test handling of invalid regex pattern"""
+        find_dialog.regex_cb.setChecked(True)
+        find_dialog.find_input.setText(r"[invalid")  # Unclosed bracket
+        find_dialog.find_all()
+
+        # Should show error message
+        assert "error" in find_dialog.status_label.text().lower()
+
+    def test_regex_case_sensitivity(self, find_dialog, text_edit):
+        """Test regex case sensitivity"""
+        text_edit.setPlainText("Hello HELLO hello")
+        find_dialog.regex_cb.setChecked(True)
+        find_dialog.find_input.setText("hello")
+
+        # Case insensitive (default)
+        find_dialog.find_all()
+        assert len(find_dialog.all_matches) == 3
+
+        # Case sensitive
+        find_dialog.case_sensitive_cb.setChecked(True)
+        find_dialog.find_all()
+        assert len(find_dialog.all_matches) == 1
