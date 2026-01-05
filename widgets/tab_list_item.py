@@ -9,9 +9,10 @@ from PyQt6.QtWidgets import (
     QMessageBox, QDialog, QLineEdit, QApplication
 )
 from PyQt6.QtCore import Qt, QSize, QPoint, QDateTime
-from PyQt6.QtGui import QFont, QMouseEvent, QFontMetrics
+from PyQt6.QtGui import QFont, QMouseEvent, QFontMetrics, QPixmap
 
 from constants import TAB_WIDTH_MINIMIZED, TAB_WIDTH_NORMAL, TAB_WIDTH_MAXIMIZED
+from windows.icon_editor import load_icon_pixmap, IconEditorDialog
 
 
 class TabListItem(QFrame):
@@ -23,6 +24,7 @@ class TabListItem(QFrame):
         self.view_mode = 'normal'  # 'minimized', 'normal', 'maximized'
         self.is_selected = False
         self.custom_emoji = None  # Custom emoji override
+        self.custom_icon = None   # Custom icon filename (stored in icons/ folder)
         self.custom_display_name = None  # Custom display name override
         self.drag_start_position = None  # For drag and drop
 
@@ -155,8 +157,25 @@ class TabListItem(QFrame):
         emoji = self.get_emoji()
         filename = self.get_filename()
 
-        # Update emoji
-        self.emoji_label.setText(emoji)
+        # Update emoji/icon display
+        if self.custom_icon:
+            # Try to load and display custom icon
+            pixmap = load_icon_pixmap(self.custom_icon)
+            if pixmap:
+                # Scale to fit the label (32x32 icon in 35px label)
+                scaled = pixmap.scaled(
+                    32, 32,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.emoji_label.setPixmap(scaled)
+            else:
+                # Icon file not found, fall back to emoji
+                self.emoji_label.setText(emoji)
+        else:
+            # Clear any pixmap and show emoji text
+            self.emoji_label.setPixmap(QPixmap())  # Clear pixmap
+            self.emoji_label.setText(emoji)
 
         # Update filename visibility
         if self.view_mode == 'minimized':
@@ -400,8 +419,60 @@ class TabListItem(QFrame):
             emoji_input.setText(self.get_emoji())
             emoji_input.setPlaceholderText("e.g., 📄 or P")
             emoji_input.setStyleSheet(input_style)
+            # Disable emoji input if custom icon is set
+            if self.custom_icon:
+                emoji_input.setEnabled(False)
+                emoji_input.setPlaceholderText("(using custom icon)")
             emoji_layout.addWidget(emoji_input)
             layout.addLayout(emoji_layout)
+
+            # Custom icon section
+            icon_layout = QHBoxLayout()
+            icon_label = QLabel("Custom Icon:")
+            icon_label.setFixedWidth(100)
+            icon_layout.addWidget(icon_label)
+
+            # Track pending icon change
+            pending_icon = [self.custom_icon]  # Use list to allow mutation in closure
+
+            # Icon status label
+            icon_status = QLabel()
+            if self.custom_icon:
+                icon_status.setText("Custom icon set")
+                icon_status.setStyleSheet("color: #4CAF50;")
+            else:
+                icon_status.setText("No custom icon")
+                icon_status.setStyleSheet("color: #666666;")
+            icon_layout.addWidget(icon_status)
+
+            icon_layout.addStretch()
+
+            # Upload icon button
+            upload_icon_btn = QPushButton("Upload...")
+            upload_icon_btn.setStyleSheet(button_style)
+
+            def open_icon_editor():
+                icon_dialog = IconEditorDialog(dialog, pending_icon[0])
+                if icon_dialog.exec() == QDialog.DialogCode.Accepted:
+                    result = icon_dialog.get_icon_filename()
+                    if result == "":
+                        # Icon removed
+                        pending_icon[0] = None
+                        icon_status.setText("Icon will be removed")
+                        icon_status.setStyleSheet("color: #FF9800;")
+                        emoji_input.setEnabled(True)
+                        emoji_input.setPlaceholderText("e.g., 📄 or P")
+                    elif result:
+                        # New icon set
+                        pending_icon[0] = result
+                        icon_status.setText("New icon selected")
+                        icon_status.setStyleSheet("color: #4CAF50;")
+                        emoji_input.setEnabled(False)
+                        emoji_input.setPlaceholderText("(using custom icon)")
+
+            upload_icon_btn.clicked.connect(open_icon_editor)
+            icon_layout.addWidget(upload_icon_btn)
+            layout.addLayout(icon_layout)
 
             # Display name input
             name_layout = QHBoxLayout()
@@ -449,12 +520,20 @@ class TabListItem(QFrame):
             dialog.setMinimumWidth(400)
 
             if dialog.exec() == QDialog.DialogCode.Accepted:
-                # Update emoji if changed
-                new_emoji = emoji_input.text().strip()
-                if new_emoji and new_emoji != self.get_emoji():
-                    self.custom_emoji = new_emoji
-                elif not new_emoji:
-                    self.custom_emoji = None
+                # Update custom icon if changed
+                if pending_icon[0] != self.custom_icon:
+                    self.custom_icon = pending_icon[0]
+                    # Clear emoji if icon is set (icon takes precedence)
+                    if self.custom_icon:
+                        self.custom_emoji = None
+
+                # Update emoji if changed (and no custom icon)
+                if not self.custom_icon:
+                    new_emoji = emoji_input.text().strip()
+                    if new_emoji and new_emoji != self.get_emoji():
+                        self.custom_emoji = new_emoji
+                    elif not new_emoji:
+                        self.custom_emoji = None
 
                 # Update display name if changed
                 new_name = name_input.text().strip()

@@ -27,6 +27,7 @@ TurnipText/
 ├── TurnipText.spec             # PyInstaller build configuration
 ├── build_exe.bat               # Windows build script for creating .exe
 ├── favicon.ico                 # Application icon
+├── icons/                      # Custom tab icons (32x32 PNG files)
 ├── models/
 │   └── tab_list_item_model.py  # TextEditorTab - data model for files
 ├── widgets/
@@ -34,7 +35,8 @@ TurnipText/
 │   ├── tab_list.py             # TabListWidget - sidebar container
 │   └── tab_list_item.py        # TabListItem - individual tab in sidebar
 ├── windows/
-│   └── find_replace.py         # FindReplaceDialog - search/replace
+│   ├── find_replace.py         # FindReplaceDialog - search/replace
+│   └── icon_editor.py          # IconEditorDialog - custom icon upload
 ├── bin/                        # Built executables (after running build)
 └── tests/
     ├── conftest.py             # pytest fixtures
@@ -196,6 +198,7 @@ class TextEditorWidget(QTextEdit):
 <tabs version="1.0" current="0" name="My Project">
   <tab path="/home/user/file.txt" pinned="False"/>
   <tab path="/home/user/notes.md" pinned="True" emoji="📝" display_name="Notes"/>
+  <tab path="/home/user/code.py" icon="icon_abc123.png" display_name="Main Code"/>
 </tabs>
 ```
 
@@ -205,8 +208,32 @@ class TextEditorWidget(QTextEdit):
 - `name`: Optional tab group name (used as window title)
 - `path`: Absolute file path
 - `pinned`: String "True" or "False"
-- `emoji`: Optional custom emoji
+- `icon`: Optional custom icon filename (stored in `icons/` folder)
+- `emoji`: Optional custom emoji (ignored if icon is set)
 - `display_name`: Optional custom display name
+
+---
+
+## Custom Icons
+
+Users can upload custom 32x32 icons for tabs instead of using emoji.
+
+**Icon Storage**:
+- Icons are stored in the `icons/` subfolder of the application directory
+- Each icon is saved as a PNG file with a unique hash-based filename
+- Icons are referenced by filename in `.tabs` files and auto-session
+
+**Icon Editor Dialog** (`windows/icon_editor.py`):
+- Browse to select any image file (PNG, JPG, BMP, GIF, ICO)
+- Scale slider (50-400%) to zoom the source image
+- X/Y position sliders to select which portion of the image to keep
+- Live preview of the final 32x32 icon
+- Auto-adjusts scale based on image dimensions
+
+**Key Functions**:
+- `get_icons_dir()`: Returns the icons directory path, creating it if needed
+- `load_icon_pixmap(filename)`: Loads an icon from the icons directory
+- `generate_icon_filename(source_path)`: Creates a unique filename for a new icon
 
 ---
 

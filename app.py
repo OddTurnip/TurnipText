@@ -23,6 +23,7 @@ from constants import TAB_WIDTH_MINIMIZED, TAB_WIDTH_NORMAL, TAB_WIDTH_MAXIMIZED
 from models.tab_list_item_model import TextEditorTab
 from widgets.tab_list import TabListWidget
 from windows.find_replace import FindReplaceDialog
+from windows.icon_editor import IconEditorDialog
 
 
 def get_app_dir():
@@ -941,8 +942,60 @@ class TextEditorWindow(QMainWindow):
         emoji_input.setText(selected_tab_item.get_emoji())
         emoji_input.setPlaceholderText("e.g., 📄 or P")
         emoji_input.setStyleSheet(input_style)
+        # Disable emoji input if custom icon is set
+        if selected_tab_item.custom_icon:
+            emoji_input.setEnabled(False)
+            emoji_input.setPlaceholderText("(using custom icon)")
         emoji_layout.addWidget(emoji_input)
         layout.addLayout(emoji_layout)
+
+        # Custom icon section
+        icon_layout = QHBoxLayout()
+        icon_label = QLabel("Custom Icon:")
+        icon_label.setFixedWidth(100)
+        icon_layout.addWidget(icon_label)
+
+        # Track pending icon change
+        pending_icon = [selected_tab_item.custom_icon]  # Use list to allow mutation in closure
+
+        # Icon status label
+        icon_status = QLabel()
+        if selected_tab_item.custom_icon:
+            icon_status.setText("Custom icon set")
+            icon_status.setStyleSheet("color: #4CAF50;")
+        else:
+            icon_status.setText("No custom icon")
+            icon_status.setStyleSheet("color: #666666;")
+        icon_layout.addWidget(icon_status)
+
+        icon_layout.addStretch()
+
+        # Upload icon button
+        upload_icon_btn = QPushButton("Upload...")
+        upload_icon_btn.setStyleSheet(button_style)
+
+        def open_icon_editor():
+            icon_dialog = IconEditorDialog(dialog, pending_icon[0])
+            if icon_dialog.exec() == QDialog.DialogCode.Accepted:
+                result = icon_dialog.get_icon_filename()
+                if result == "":
+                    # Icon removed
+                    pending_icon[0] = None
+                    icon_status.setText("Icon will be removed")
+                    icon_status.setStyleSheet("color: #FF9800;")
+                    emoji_input.setEnabled(True)
+                    emoji_input.setPlaceholderText("e.g., 📄 or P")
+                elif result:
+                    # New icon set
+                    pending_icon[0] = result
+                    icon_status.setText("New icon selected")
+                    icon_status.setStyleSheet("color: #4CAF50;")
+                    emoji_input.setEnabled(False)
+                    emoji_input.setPlaceholderText("(using custom icon)")
+
+        upload_icon_btn.clicked.connect(open_icon_editor)
+        icon_layout.addWidget(upload_icon_btn)
+        layout.addLayout(icon_layout)
 
         # Display name input
         name_layout = QHBoxLayout()
@@ -990,12 +1043,20 @@ class TextEditorWindow(QMainWindow):
         dialog.setMinimumWidth(400)
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            # Update emoji if changed
-            new_emoji = emoji_input.text().strip()
-            if new_emoji and new_emoji != selected_tab_item.get_emoji():
-                selected_tab_item.custom_emoji = new_emoji
-            elif not new_emoji:
-                selected_tab_item.custom_emoji = None
+            # Update custom icon if changed
+            if pending_icon[0] != selected_tab_item.custom_icon:
+                selected_tab_item.custom_icon = pending_icon[0]
+                # Clear emoji if icon is set (icon takes precedence)
+                if selected_tab_item.custom_icon:
+                    selected_tab_item.custom_emoji = None
+
+            # Update emoji if changed (and no custom icon)
+            if not selected_tab_item.custom_icon:
+                new_emoji = emoji_input.text().strip()
+                if new_emoji and new_emoji != selected_tab_item.get_emoji():
+                    selected_tab_item.custom_emoji = new_emoji
+                elif not new_emoji:
+                    selected_tab_item.custom_emoji = None
 
             # Update display name if changed
             new_name = name_input.text().strip()
@@ -1032,9 +1093,10 @@ class TextEditorWindow(QMainWindow):
                     'path': widget.file_path,
                     'pinned': widget.is_pinned
                 }
-                # Find matching tab item for emoji/display name
+                # Find matching tab item for icon/emoji/display name
                 for tab_item in self.tab_list.tab_items:
                     if tab_item.editor_tab == widget:
+                        tab_data['icon'] = tab_item.custom_icon
                         tab_data['emoji'] = tab_item.custom_emoji
                         tab_data['display_name'] = tab_item.custom_display_name
                         break
@@ -1366,9 +1428,11 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                 tab_elem.set('path', widget.file_path)
                 tab_elem.set('pinned', str(widget.is_pinned))
 
-                # Save custom emoji and display name if set
+                # Save custom emoji, icon, and display name if set
                 for tab_item in self.tab_list.tab_items:
                     if tab_item.editor_tab == widget:
+                        if tab_item.custom_icon:
+                            tab_elem.set('icon', tab_item.custom_icon)
                         if tab_item.custom_emoji:
                             tab_elem.set('emoji', tab_item.custom_emoji)
                         if tab_item.custom_display_name:
@@ -1446,6 +1510,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             for tab_elem in root.findall('tab'):
                 file_path = tab_elem.get('path')
                 is_pinned = tab_elem.get('pinned', 'False') == 'True'
+                custom_icon = tab_elem.get('icon')  # May be None
                 custom_emoji = tab_elem.get('emoji')  # May be None
                 custom_display_name = tab_elem.get('display_name')  # May be None
 
@@ -1461,12 +1526,14 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     self.apply_monospace_to_tab(tab)
                     self._watch_file(file_path)
 
-                    # Set custom emoji and display name if they were saved
+                    # Set custom icon, emoji and display name if they were saved
+                    if custom_icon:
+                        tab_item.custom_icon = custom_icon
                     if custom_emoji:
                         tab_item.custom_emoji = custom_emoji
                     if custom_display_name:
                         tab_item.custom_display_name = custom_display_name
-                    if custom_emoji or custom_display_name:
+                    if custom_icon or custom_emoji or custom_display_name:
                         tab_item.update_display()
 
                     loaded_tabs.append(tab)
@@ -1527,9 +1594,11 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     'pinned': widget.is_pinned
                 }
 
-                # Save custom emoji and display name if set
+                # Save custom icon, emoji and display name if set
                 for tab_item in self.tab_list.tab_items:
                     if tab_item.editor_tab == widget:
+                        if tab_item.custom_icon:
+                            tab_data['icon'] = tab_item.custom_icon
                         if tab_item.custom_emoji:
                             tab_data['emoji'] = tab_item.custom_emoji
                         if tab_item.custom_display_name:
@@ -1631,6 +1700,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             for tab_data in auto_session['tabs']:
                 file_path = tab_data['path']
                 is_pinned = tab_data.get('pinned', False)
+                custom_icon = tab_data.get('icon')  # May be None
                 custom_emoji = tab_data.get('emoji')  # May be None
                 custom_display_name = tab_data.get('display_name')  # May be None
 
@@ -1646,12 +1716,14 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     self.apply_monospace_to_tab(tab)
                     self._watch_file(file_path)
 
-                    # Set custom emoji and display name if they were saved
+                    # Set custom icon, emoji and display name if they were saved
+                    if custom_icon:
+                        tab_item.custom_icon = custom_icon
                     if custom_emoji:
                         tab_item.custom_emoji = custom_emoji
                     if custom_display_name:
                         tab_item.custom_display_name = custom_display_name
-                    if custom_emoji or custom_display_name:
+                    if custom_icon or custom_emoji or custom_display_name:
                         tab_item.update_display()
 
                     loaded_tabs.append(tab)
