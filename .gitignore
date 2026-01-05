@@ -29,3 +29,7 @@ build/
 dist/
 bin/
 *.spec.bak
+TurnipText.exe
+
+# Custom icons (user-uploaded, stored locally)
+icons/

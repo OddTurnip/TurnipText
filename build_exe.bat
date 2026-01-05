@@ -29,10 +29,9 @@ if exist "dist\TurnipText.exe" (
     echo ========================================
     echo.
 
-    REM Copy to bin folder
-    if not exist "bin" mkdir "bin"
-    copy "dist\TurnipText.exe" "bin\TurnipText.exe"
-    echo Copied to: bin\TurnipText.exe
+    REM Copy to project root (so EXE shares icons/ folder with script)
+    copy "dist\TurnipText.exe" "TurnipText.exe"
+    echo Copied to: TurnipText.exe (project root)
 ) else (
     echo.
     echo Build FAILED. Check the output above for errors.
