@@ -6,10 +6,10 @@ Displays file name, emoji, buttons, and handles drag-and-drop.
 import os
 from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QMessageBox, QDialog, QLineEdit
+    QMessageBox, QDialog, QLineEdit, QApplication
 )
 from PyQt6.QtCore import Qt, QSize, QPoint, QDateTime
-from PyQt6.QtGui import QFont, QMouseEvent
+from PyQt6.QtGui import QFont, QMouseEvent, QFontMetrics
 
 from constants import TAB_WIDTH_MINIMIZED, TAB_WIDTH_NORMAL, TAB_WIDTH_MAXIMIZED
 
@@ -145,6 +145,11 @@ class TabListItem(QFrame):
         self.view_mode = mode
         self.update_display()
 
+    def get_elided_filename(self, filename, max_width):
+        """Get filename elided to fit within max_width pixels"""
+        font_metrics = QFontMetrics(self.filename_label.font())
+        return font_metrics.elidedText(filename, Qt.TextElideMode.ElideRight, max_width)
+
     def update_display(self):
         """Update the display based on current view mode and state"""
         emoji = self.get_emoji()
@@ -162,14 +167,25 @@ class TabListItem(QFrame):
             self.modified_label.setVisible(False)
         elif self.view_mode == 'normal':
             self.filename_label.setVisible(True)
-            self.filename_label.setText(filename)
+            # Calculate available width: total - emoji - buttons - margins - spacing
+            # emoji: 35px, buttons: 3*20px + 2*5px spacing = 70px, margins: 16px, extra spacing: ~20px
+            available_width = TAB_WIDTH_NORMAL - 35 - 70 - 16 - 20
+            elided = self.get_elided_filename(filename, available_width)
+            self.filename_label.setText(elided)
+            # Show full filename in tooltip if truncated
+            self.filename_label.setToolTip(filename if elided != filename else "")
             self.save_btn.setVisible(True)
             self.pin_btn.setVisible(True)
             self.close_btn.setVisible(True)
             self.modified_label.setVisible(False)
         else:  # maximized
             self.filename_label.setVisible(True)
-            self.filename_label.setText(filename)
+            # More space available in maximized mode
+            available_width = TAB_WIDTH_MAXIMIZED - 35 - 70 - 16 - 20
+            elided = self.get_elided_filename(filename, available_width)
+            self.filename_label.setText(elided)
+            # Show full filename in tooltip if truncated
+            self.filename_label.setToolTip(filename if elided != filename else "")
             self.save_btn.setVisible(True)
             self.pin_btn.setVisible(True)
             self.close_btn.setVisible(True)

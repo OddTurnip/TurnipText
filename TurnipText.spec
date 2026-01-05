@@ -15,7 +15,9 @@ a = Analysis(
     ['app.py'],
     pathex=[str(spec_dir)],
     binaries=[],
-    datas=[],
+    datas=[
+        ('favicon.ico', '.'),  # Include favicon.ico in the bundle root
+    ],
     hiddenimports=[
         'PyQt6.QtCore',
         'PyQt6.QtGui',
