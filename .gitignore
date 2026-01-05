@@ -22,3 +22,8 @@ Thumbs.db
 
 # Editor settings
 .editor_settings.json
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec.bak
