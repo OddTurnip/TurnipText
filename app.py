@@ -54,8 +54,8 @@ class TextEditorWindow(QMainWindow):
         self.last_file_folder = None
         self.last_tabs_folder = None
         self.settings_file = os.path.join(get_app_dir(), '.editor_settings.json')
-        self.tabs_metadata_modified = False  # Track if tab metadata (emoji/display name) has changed
         self.tab_group_name = None  # Custom name for the tab group (used as window title)
+        self._baseline_tab_state = None  # Baseline state for comparison (set when loading/saving .tabs)
         self._initial_splitter_set = False  # Track if initial splitter position has been applied
         self.find_replace_dialog = None  # Will be created when first needed
 
@@ -1019,41 +1019,75 @@ class TextEditorWindow(QMainWindow):
             return current_widget
         return None
 
+    def _get_current_tab_state(self):
+        """Get a snapshot of the current tab state for comparison."""
+        state = {
+            'tab_group_name': self.tab_group_name,
+            'tabs': []
+        }
+        for i in range(self.content_stack.count()):
+            widget = self.content_stack.widget(i)
+            if isinstance(widget, TextEditorTab) and widget.file_path:
+                tab_data = {
+                    'path': widget.file_path,
+                    'pinned': widget.is_pinned
+                }
+                # Find matching tab item for emoji/display name
+                for tab_item in self.tab_list.tab_items:
+                    if tab_item.editor_tab == widget:
+                        tab_data['emoji'] = tab_item.custom_emoji
+                        tab_data['display_name'] = tab_item.custom_display_name
+                        break
+                state['tabs'].append(tab_data)
+        return state
+
+    def _set_baseline_tab_state(self):
+        """Set the baseline state to compare against."""
+        self._baseline_tab_state = self._get_current_tab_state()
+
+    def _has_tab_state_changed(self):
+        """Check if the current tab state differs from the baseline."""
+        if self._baseline_tab_state is None:
+            return False
+        return self._get_current_tab_state() != self._baseline_tab_state
+
+    def update_save_tabs_button(self):
+        """Update the Save Tabs button appearance based on whether state has changed."""
+        # Only show as modified if there's a tabs file or tab group name to save to
+        has_changes = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
+
+        if has_changes:
+            self.save_tabs_btn.setText("⚠️ Save Tabs")
+            # Override button style with yellow background
+            modified_style = """
+                QPushButton {
+                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                      stop:0 #FFFDE7, stop:1 #FFF9C4);
+                    border: 1px solid #F9A825;
+                    border-radius: 6px;
+                    padding: 6px 12px;
+                    min-height: 24px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                      stop:0 #FFFEF0, stop:1 #FFEB3B);
+                    border: 1px solid #F57F17;
+                }
+                QPushButton:pressed {
+                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                      stop:0 #FFF59D, stop:1 #FBC02D);
+                    border: 1px solid #E65100;
+                }
+            """
+            self.save_tabs_btn.setStyleSheet(modified_style)
+        else:
+            self.save_tabs_btn.setText("💾 Save Tabs")
+            self.save_tabs_btn.setStyleSheet(self.default_button_style)
+
     def mark_tabs_metadata_modified(self):
-        """Mark that tab metadata (emoji/display name) has been modified.
-
-        Only marks as modified if there's an existing .tabs file or tab group name,
-        since otherwise the auto-session handles persistence automatically.
-        """
-        # Only track as "unsaved" if there's a tabs file to save to or a custom name set
-        if not self.current_tabs_file and not self.tab_group_name:
-            return
-
-        self.tabs_metadata_modified = True
-        self.save_tabs_btn.setText("⚠️ Save Tabs")
-        # Override button style with yellow background while preserving structure
-        modified_style = """
-            QPushButton {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #FFFDE7, stop:1 #FFF9C4);
-                border: 1px solid #F9A825;
-                border-radius: 6px;
-                padding: 6px 12px;
-                min-height: 24px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #FFFEF0, stop:1 #FFEB3B);
-                border: 1px solid #F57F17;
-            }
-            QPushButton:pressed {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #FFF59D, stop:1 #FBC02D);
-                border: 1px solid #E65100;
-            }
-        """
-        self.save_tabs_btn.setStyleSheet(modified_style)
+        """Called when tab metadata may have changed - updates button state."""
+        self.update_save_tabs_button()
 
     def update_tab_title(self, tab):
         """Update the title of a tab"""
@@ -1362,10 +1396,9 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
         self.last_saved_label.setText(f"Saved tabs {current_time}")
         self.last_saved_label.setVisible(True)
 
-        # Clear metadata modified flag and reset button appearance
-        self.tabs_metadata_modified = False
-        self.save_tabs_btn.setText("💾 Save Tabs")
-        self.save_tabs_btn.setStyleSheet(self.default_button_style)  # Reset to default style
+        # Set baseline state and update button appearance
+        self._set_baseline_tab_state()
+        self.update_save_tabs_button()
 
     def load_tabs_dialog(self):
         """Show dialog to load tabs"""
@@ -1451,6 +1484,9 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             # Update current tabs file and window title
             self.current_tabs_file = tabs_file_path
             self.update_window_title()
+
+            # Set baseline state for change tracking
+            self._set_baseline_tab_state()
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load tabs:\n{str(e)}")
@@ -1724,7 +1760,8 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             # result == 1: Exit without saving, just continue
 
         # Check for unsaved tab group changes
-        if self.tabs_metadata_modified:
+        has_tab_changes = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
+        if has_tab_changes:
             from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
 
             # Create custom dialog
@@ -1811,8 +1848,8 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     self.save_tabs(self.current_tabs_file)
                 else:
                     self.save_tabs_dialog()
-                    # Check if save was cancelled
-                    if self.tabs_metadata_modified:
+                    # Check if save was cancelled (state still differs from baseline)
+                    if self._has_tab_state_changed():
                         event.ignore()
                         return
             # result == 1: Exit without saving, just continue
