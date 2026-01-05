@@ -25,6 +25,16 @@ from widgets.tab_list import TabListWidget
 from windows.find_replace import FindReplaceDialog
 
 
+def get_app_dir():
+    """Get the application directory - works for both script and frozen exe"""
+    if getattr(sys, 'frozen', False):
+        # Running as compiled exe (PyInstaller)
+        return os.path.dirname(sys.executable)
+    else:
+        # Running as script
+        return os.path.dirname(__file__)
+
+
 class TextEditorWindow(QMainWindow):
     """Main text editor window"""
 
@@ -33,7 +43,7 @@ class TextEditorWindow(QMainWindow):
         self.current_tabs_file = None
         self.last_file_folder = None
         self.last_tabs_folder = None
-        self.settings_file = os.path.join(os.path.dirname(__file__), '.editor_settings.json')
+        self.settings_file = os.path.join(get_app_dir(), '.editor_settings.json')
         self.tabs_metadata_modified = False  # Track if tab metadata (emoji/display name) has changed
         self._initial_splitter_set = False  # Track if initial splitter position has been applied
         self.find_replace_dialog = None  # Will be created when first needed
@@ -68,7 +78,7 @@ class TextEditorWindow(QMainWindow):
         self.setGeometry(100, 100, 1000, 700)
 
         # Set window icon
-        icon_path = os.path.join(os.path.dirname(__file__), 'favicon.ico')
+        icon_path = os.path.join(get_app_dir(), 'favicon.ico')
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
@@ -1208,9 +1218,6 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
         with open(tabs_file_path, 'w', encoding='utf-8') as f:
             f.write(xml_str)
 
-        # Create .bat file
-        self.create_bat_file(tabs_file_path)
-
         # Update current tabs file and window title
         self.current_tabs_file = tabs_file_path
         self.update_window_title()
@@ -1225,18 +1232,6 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
         self.tabs_metadata_modified = False
         self.save_tabs_btn.setText("💾 Save Tabs")
         self.save_tabs_btn.setStyleSheet(self.default_button_style)  # Reset to default style
-
-    def create_bat_file(self, tabs_file_path):
-        """Create a .bat file to launch editor with tabs"""
-        bat_path = tabs_file_path.replace('.tabs', '.bat')
-        script_path = os.path.abspath(__file__)
-
-        # Create batch file content that doesn't leave a window open
-        bat_content = f'@echo off\n'
-        bat_content += f'start "" pythonw "{script_path}" "{tabs_file_path}"\n'
-
-        with open(bat_path, 'w', encoding='utf-8') as f:
-            f.write(bat_content)
 
     def load_tabs_dialog(self):
         """Show dialog to load tabs"""
@@ -1595,7 +1590,7 @@ def main():
     app = QApplication(sys.argv)
 
     # Set application icon (for taskbar)
-    icon_path = os.path.join(os.path.dirname(__file__), 'favicon.ico')
+    icon_path = os.path.join(get_app_dir(), 'favicon.ico')
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
 
@@ -1608,6 +1603,41 @@ def main():
             tabs_file = None
 
     window = TextEditorWindow(tabs_file)
+
+    # Install global exception handler to prevent crashes from losing unsaved work
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        """Handle uncaught exceptions with a dialog instead of crashing"""
+        import traceback
+
+        # Format the error message
+        error_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
+        error_text = ''.join(error_lines)
+
+        # Log to console
+        print(f"Unhandled exception:\n{error_text}", file=sys.stderr)
+
+        # Show error dialog
+        msg = QMessageBox(window)
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle("Error")
+        msg.setText("An unexpected error occurred.")
+        msg.setInformativeText(
+            "The application encountered an error but hasn't closed.\n"
+            "You can try to save your work before closing."
+        )
+        msg.setDetailedText(error_text)
+        msg.setStandardButtons(
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Close
+        )
+        msg.setDefaultButton(QMessageBox.StandardButton.Ok)
+
+        result = msg.exec()
+        if result == QMessageBox.StandardButton.Close:
+            # User chose to close - trigger normal close which will prompt for unsaved changes
+            window.close()
+
+    sys.excepthook = handle_exception
+
     window.show()
 
     sys.exit(app.exec())

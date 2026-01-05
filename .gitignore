@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *$py.class
 *.so
@@ -22,3 +23,9 @@ Thumbs.db
 
 # Editor settings
 .editor_settings.json
+
+# PyInstaller build artifacts
+build/
+dist/
+bin/
+*.spec.bak

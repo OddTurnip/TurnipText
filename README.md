@@ -1,47 +1,65 @@
 # TurnipText
 
-A minimal tabbed text editor built with PyQt6, featuring tab management and workspace sessions.
+![TurnipText Screenshot](screenshot.png)
+
+> **Personal Project Disclaimer**: This is a personal text editor tailored to my specific workflow. The beauty of it is that new features can be added just by chatting with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) - no manual coding required!
 
 ## Features
 
-- **Tabbed Interface**: Open and manage multiple files in tabs
-- **File Operations**: New, Load, Save, and Save As functionality
-- **Tab Management**:
-  - Pin tabs to prevent accidental closure
-  - Close individual tabs with unsaved change warnings
-  - Visual indicator for unsaved changes
-  - Drag-and-drop tab reordering
-  - Custom emoji and display names for tabs
-- **Workspace Sessions**:
-  - Save all open tabs to a `.tabs` file (XML format)
-  - Load tab sessions to restore your workspace
-  - Automatically generate `.bat` files to launch workspaces (Windows)
-- **Find & Replace**: Search and replace with case-sensitive and whole-word options
-- **Format Support**: Plain text files (any extension)
+### Tabbed Interface
+- **Tabbed Interface** - Open and manage multiple files simultaneously
+- **Pin Tabs** - Keep important files pinned so they can't be accidentally closed
+- **Custom Tab Appearance** - Set custom emoji and display names for each tab
+- **Drag & Drop Reordering** - Organize tabs by dragging them around
+- **Multiple Tab Views** - Minimize to show just the selected emoji, or maximize for extra information
 
-## Installation
+### Tab Management
+- **Workspace Sessions** - Save and restore your entire workspace (`.tabs` files)
+- **Auto-Restore Session** - Automatically restores your last session on launch
 
-1. Install Python 3.8 or higher
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### Text Editing
+- **Find & Replace** - Search with case-sensitive and whole-word matching
+- **External Change Detection** - Alerts you when files are modified outside the editor
 
-## Usage
+## Running Locally
 
-### Starting the Editor
+### Prerequisites
+- Python 3.8+
+- PyQt6
 
-Run the editor:
+### Install & Run
+
 ```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the editor
 python app.py
+
+# Or load a saved workspace
+python app.py myworkspace.tabs
 ```
 
-Or load a saved tab session:
+## Creating an Executable
+
+To create a standalone `.exe` (Windows), `.app` (macOS), or binary (Linux):
+
 ```bash
-python app.py workspace.tabs
+# Install PyInstaller
+pip install pyinstaller
+
+# Build the executable
+pyinstaller TurnipText.spec --noconfirm
+
+# Output will be in dist/TurnipText.exe (or dist/TurnipText on Linux/macOS)
 ```
 
-### Keyboard Shortcuts
+On Windows, you can also just run `build_exe.bat`.
+
+Once built, you can:
+- **Associate .tabs files** - Right-click a `.tabs` file → Open with → Choose the executable → "Always use this app"
+
+## Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
@@ -52,67 +70,17 @@ python app.py workspace.tabs
 | Ctrl+F | Find & Replace |
 | Ctrl+H | Find & Replace |
 
-### Tab Controls
+## Workspace Sessions
 
-Each tab has:
-- **Pin button**: Pin/unpin the tab
-- **Close button**: Close the tab
-- **Save button**: Appears when file has unsaved changes
+Save your entire workspace to a `.tabs` file:
+1. Open all the files you want
+2. Click **Save Tabs**
+3. Choose a location and filename
 
-### Workspace Sessions
+The `.tabs` file stores:
+- All open file paths
+- Which tabs are pinned
+- Custom emoji and display names
+- The currently active tab
 
-**Save Tabs:**
-1. Open all files you want in your workspace
-2. Click **Save Tabs** button
-3. Choose a location and name (e.g., `myproject.tabs`)
-4. This creates:
-   - `myproject.tabs`: XML file with tab configuration
-   - `myproject.bat`: Windows batch file to launch the workspace
-
-**Load Tabs:**
-- Click **Load Tabs** and select a `.tabs` file
-- Or double-click the generated `.bat` file (Windows)
-- All files will open in tabs, with the previously active tab selected
-
-### Tab Session File Format
-
-The `.tabs` files use XML format:
-```xml
-<?xml version="1.0"?>
-<tabs version="1.0" current="0">
-  <tab path="/path/to/file1.txt" pinned="False"/>
-  <tab path="/path/to/file2.md" pinned="True" emoji="📝" display_name="Notes"/>
-</tabs>
-```
-
-## Project Structure
-
-```
-TurnipText/
-├── app.py                  # Main application window
-├── constants.py            # Configuration constants
-├── models/
-│   └── tab_list_item_model.py   # TextEditorTab data model
-├── widgets/
-│   ├── tab_list.py              # Tab sidebar container
-│   ├── tab_list_item.py         # Individual tab widget
-│   └── text_editor.py           # Text editor widget
-├── windows/
-│   └── find_replace.py          # Find & Replace dialog
-└── tests/                       # Test suite
-```
-
-## Running Tests
-
-```bash
-pip install pytest pytest-qt
-python -m pytest tests/ -v
-```
-
-## Notes
-
-- Files use full absolute paths in `.tabs` files
-- Pinned tabs require confirmation before closing
-- Unsaved changes are checked when closing tabs or the application
-- Plain text only (no rich text formatting)
-- Auto-saves session on exit, restores on next launch
+Load a workspace by clicking **Load Tabs** or passing the `.tabs` file as an argument.
