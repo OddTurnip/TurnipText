@@ -1667,12 +1667,26 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                         self.tab_list.select_tab(tab_item)
                         break
 
+            # Set baseline state if there's a tabs file to track changes against
+            if self.current_tabs_file:
+                self._set_baseline_tab_state()
+
         except Exception as e:
             print(f"Failed to load auto-session: {e}")
             # On error, start with empty editor
 
     def closeEvent(self, event):
         """Handle window close event"""
+        # Disconnect file watcher immediately to prevent callbacks during close
+        try:
+            self.file_watcher.fileChanged.disconnect(self._on_file_changed)
+        except TypeError:
+            pass  # Already disconnected
+        # Remove all watched files
+        watched_files = self.file_watcher.files()
+        if watched_files:
+            self.file_watcher.removePaths(watched_files)
+
         # Check for unsaved changes in all tabs
         modified_tabs = []
         for i in range(self.content_stack.count()):
