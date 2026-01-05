@@ -428,7 +428,7 @@ class TabListItem(QFrame):
 
             # Custom icon section
             icon_layout = QHBoxLayout()
-            icon_label = QLabel("Custom Icon:")
+            icon_label = QLabel("Icon:")
             icon_label.setFixedWidth(100)
             icon_layout.addWidget(icon_label)
 
@@ -447,6 +447,22 @@ class TabListItem(QFrame):
 
             icon_layout.addStretch()
 
+            # Remove icon button (only shown when icon is set)
+            remove_icon_btn = QPushButton("Remove")
+            remove_icon_btn.setStyleSheet(button_style)
+            remove_icon_btn.setVisible(self.custom_icon is not None)
+
+            def remove_icon():
+                pending_icon[0] = None
+                icon_status.setText("Icon will be removed")
+                icon_status.setStyleSheet("color: #FF9800;")
+                emoji_input.setEnabled(True)
+                emoji_input.setPlaceholderText("e.g., 📄 or P")
+                remove_icon_btn.setVisible(False)
+
+            remove_icon_btn.clicked.connect(remove_icon)
+            icon_layout.addWidget(remove_icon_btn)
+
             # Upload icon button
             upload_icon_btn = QPushButton("Upload...")
             upload_icon_btn.setStyleSheet(button_style)
@@ -456,12 +472,8 @@ class TabListItem(QFrame):
                 if icon_dialog.exec() == QDialog.DialogCode.Accepted:
                     result = icon_dialog.get_icon_filename()
                     if result == "":
-                        # Icon removed
-                        pending_icon[0] = None
-                        icon_status.setText("Icon will be removed")
-                        icon_status.setStyleSheet("color: #FF9800;")
-                        emoji_input.setEnabled(True)
-                        emoji_input.setPlaceholderText("e.g., 📄 or P")
+                        # Icon removed (from icon editor dialog)
+                        remove_icon()
                     elif result:
                         # New icon set
                         pending_icon[0] = result
@@ -469,6 +481,7 @@ class TabListItem(QFrame):
                         icon_status.setStyleSheet("color: #4CAF50;")
                         emoji_input.setEnabled(False)
                         emoji_input.setPlaceholderText("(using custom icon)")
+                        remove_icon_btn.setVisible(True)
 
             upload_icon_btn.clicked.connect(open_icon_editor)
             icon_layout.addWidget(upload_icon_btn)
