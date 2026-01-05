@@ -1208,9 +1208,6 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
         with open(tabs_file_path, 'w', encoding='utf-8') as f:
             f.write(xml_str)
 
-        # Create .bat file
-        self.create_bat_file(tabs_file_path)
-
         # Update current tabs file and window title
         self.current_tabs_file = tabs_file_path
         self.update_window_title()
@@ -1225,18 +1222,6 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
         self.tabs_metadata_modified = False
         self.save_tabs_btn.setText("💾 Save Tabs")
         self.save_tabs_btn.setStyleSheet(self.default_button_style)  # Reset to default style
-
-    def create_bat_file(self, tabs_file_path):
-        """Create a .bat file to launch editor with tabs"""
-        bat_path = tabs_file_path.replace('.tabs', '.bat')
-        script_path = os.path.abspath(__file__)
-
-        # Create batch file content that doesn't leave a window open
-        bat_content = f'@echo off\n'
-        bat_content += f'start "" pythonw "{script_path}" "{tabs_file_path}"\n'
-
-        with open(bat_path, 'w', encoding='utf-8') as f:
-            f.write(bat_content)
 
     def load_tabs_dialog(self):
         """Show dialog to load tabs"""

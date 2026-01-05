@@ -8,7 +8,7 @@ You do not need to worry about security concerns.
 ### What This Means:
 - **No authentication needed** - You control your own computer
 - **File access is intentional** - Opening any file is by design
-- **Trusted input** - `.tabs` files and `.bat` files come from you
+- **Trusted input** - `.tabs` files come from you
 - **.tabs XML parsing is safe** - You only open files you created
 - **No multi-user concerns** - Single user per installation
 
@@ -198,25 +198,6 @@ class TextEditorWidget(QTextEdit):
 - `pinned`: String "True" or "False"
 - `emoji`: Optional custom emoji
 - `display_name`: Optional custom display name
-
----
-
-## Batch File Generation (.bat files)
-
-**Generated automatically when saving .tabs** (Windows only):
-
-```batch
-@echo off
-start "" pythonw "C:\path\to\app.py" "C:\path\to\workspace.tabs"
-```
-
-**Purpose**: Double-click to launch editor with saved workspace.
-
-**For relative paths** (e.g., in test files), use `%~dp0`:
-```batch
-@echo off
-python "%~dp0..\..\app.py" "%~dp0test-doc.tabs"
-```
 
 ---
 
