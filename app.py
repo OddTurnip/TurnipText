@@ -942,11 +942,14 @@ class TextEditorWindow(QMainWindow):
         emoji_input.setText(selected_tab_item.get_emoji())
         emoji_input.setPlaceholderText("e.g., 📄 or P")
         emoji_input.setStyleSheet(input_style)
-        # Disable emoji input if custom icon is set
-        if selected_tab_item.custom_icon:
-            emoji_input.setEnabled(False)
-            emoji_input.setPlaceholderText("(using custom icon)")
         emoji_layout.addWidget(emoji_input)
+
+        # Hint label (shown when icon overrides emoji)
+        emoji_hint = QLabel("(icon overrides)")
+        emoji_hint.setStyleSheet("color: #666666; font-style: italic;")
+        emoji_hint.setVisible(selected_tab_item.custom_icon is not None)
+        emoji_layout.addWidget(emoji_hint)
+
         layout.addLayout(emoji_layout)
 
         # Custom icon section
@@ -979,8 +982,7 @@ class TextEditorWindow(QMainWindow):
             pending_icon[0] = None
             icon_status.setText("Icon will be removed")
             icon_status.setStyleSheet("color: #FF9800;")
-            emoji_input.setEnabled(True)
-            emoji_input.setPlaceholderText("e.g., 📄 or P")
+            emoji_hint.setVisible(False)
             remove_icon_btn.setVisible(False)
 
         remove_icon_btn.clicked.connect(remove_icon)
@@ -1002,8 +1004,7 @@ class TextEditorWindow(QMainWindow):
                     pending_icon[0] = result
                     icon_status.setText("New icon selected")
                     icon_status.setStyleSheet("color: #4CAF50;")
-                    emoji_input.setEnabled(False)
-                    emoji_input.setPlaceholderText("(using custom icon)")
+                    emoji_hint.setVisible(True)
                     remove_icon_btn.setVisible(True)
 
         upload_icon_btn.clicked.connect(open_icon_editor)
@@ -1059,17 +1060,13 @@ class TextEditorWindow(QMainWindow):
             # Update custom icon if changed
             if pending_icon[0] != selected_tab_item.custom_icon:
                 selected_tab_item.custom_icon = pending_icon[0]
-                # Clear emoji if icon is set (icon takes precedence)
-                if selected_tab_item.custom_icon:
-                    selected_tab_item.custom_emoji = None
 
-            # Update emoji if changed (and no custom icon)
-            if not selected_tab_item.custom_icon:
-                new_emoji = emoji_input.text().strip()
-                if new_emoji and new_emoji != selected_tab_item.get_emoji():
-                    selected_tab_item.custom_emoji = new_emoji
-                elif not new_emoji:
-                    selected_tab_item.custom_emoji = None
+            # Always save emoji (preserved even when icon is set)
+            new_emoji = emoji_input.text().strip()
+            if new_emoji and new_emoji != selected_tab_item.get_emoji():
+                selected_tab_item.custom_emoji = new_emoji
+            elif not new_emoji:
+                selected_tab_item.custom_emoji = None
 
             # Update display name if changed
             new_name = name_input.text().strip()
