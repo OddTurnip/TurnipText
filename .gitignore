@@ -27,4 +27,5 @@ Thumbs.db
 # PyInstaller build artifacts
 build/
 dist/
+bin/
 *.spec.bak

@@ -6,15 +6,20 @@
 
 ## Features
 
+### Tabbed Interface
 - **Tabbed Interface** - Open and manage multiple files simultaneously
 - **Pin Tabs** - Keep important files pinned so they can't be accidentally closed
 - **Custom Tab Appearance** - Set custom emoji and display names for each tab
 - **Drag & Drop Reordering** - Organize tabs by dragging them around
+- **Multiple Tab Views** - Minimize to show just the selected emoji, or maximize for extra information
+
+### Tab Management
 - **Workspace Sessions** - Save and restore your entire workspace (`.tabs` files)
+- **Auto-Restore Session** - Automatically restores your last session on launch
+
+### Text Editing
 - **Find & Replace** - Search with case-sensitive and whole-word matching
-- **Auto-Save Session** - Automatically restores your last session on launch
 - **External Change Detection** - Alerts you when files are modified outside the editor
-- **Three View Modes** - Minimized (emoji only), normal, or maximized tab sidebar
 
 ## Running Locally
 
@@ -52,7 +57,6 @@ pyinstaller TurnipText.spec --noconfirm
 On Windows, you can also just run `build_exe.bat`.
 
 Once built, you can:
-- **Pin to taskbar** - Run it once, right-click the taskbar icon, select "Pin to taskbar"
 - **Associate .tabs files** - Right-click a `.tabs` file → Open with → Choose the executable → "Always use this app"
 
 ## Keyboard Shortcuts
