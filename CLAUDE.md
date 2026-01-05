@@ -193,7 +193,7 @@ class TextEditorWidget(QTextEdit):
 **Format**:
 ```xml
 <?xml version="1.0"?>
-<tabs version="1.0" current="0">
+<tabs version="1.0" current="0" name="My Project">
   <tab path="/home/user/file.txt" pinned="False"/>
   <tab path="/home/user/notes.md" pinned="True" emoji="📝" display_name="Notes"/>
 </tabs>
@@ -202,6 +202,7 @@ class TextEditorWidget(QTextEdit):
 **Attributes**:
 - `version`: Format version (currently "1.0")
 - `current`: Index of active tab (0-based)
+- `name`: Optional tab group name (used as window title)
 - `path`: Absolute file path
 - `pinned`: String "True" or "False"
 - `emoji`: Optional custom emoji
