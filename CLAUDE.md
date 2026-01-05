@@ -24,6 +24,9 @@ The application is organized into focused modules:
 TurnipText/
 ├── app.py                      # Main application entry point & TextEditorWindow
 ├── constants.py                # TAB_WIDTH_* configuration constants
+├── TurnipText.spec             # PyInstaller build configuration
+├── build_exe.bat               # Windows build script for creating .exe
+├── favicon.ico                 # Application icon
 ├── models/
 │   └── tab_list_item_model.py  # TextEditorTab - data model for files
 ├── widgets/
@@ -32,10 +35,12 @@ TurnipText/
 │   └── tab_list_item.py        # TabListItem - individual tab in sidebar
 ├── windows/
 │   └── find_replace.py         # FindReplaceDialog - search/replace
+├── bin/                        # Built executables (after running build)
 └── tests/
     ├── conftest.py             # pytest fixtures
     ├── test_app.py             # Window/settings tests
     ├── test_tab_list_item_model.py  # TextEditorTab tests
+    ├── test_tab_list_item.py   # TabListItem view mode tests
     ├── test_find_replace.py    # Find/Replace tests
     └── test_files/             # Test fixtures
 ```
@@ -125,8 +130,11 @@ Currently a thin wrapper around QTextEdit with:
 - Auto-save session on exit
 - Window geometry persistence
 - File size limits (warns >1MB, refuses >100MB)
+- Global error handler (prevents crashes from losing unsaved work)
 
 **Settings file**: `.editor_settings.json` (stored in app directory)
+
+**Helper function**: `get_app_dir()` returns the correct directory for settings/icons whether running as a script or PyInstaller exe.
 
 ---
 
@@ -212,6 +220,7 @@ python -m pytest tests/ -v
 **Test structure**:
 - `test_app.py` - Window creation, settings save/load, auto-session
 - `test_tab_list_item_model.py` - TextEditorTab file operations
+- `test_tab_list_item.py` - TabListItem view modes (minimized/normal/maximized)
 - `test_find_replace.py` - Search and replace functionality
 - `conftest.py` - Shared fixtures (qapp, temp_dir, temp_file)
 
@@ -246,6 +255,36 @@ PyQt6>=6.4.0
 pytest>=7.0.0
 pytest-qt>=4.2.0
 ```
+
+**For building executables**:
+```
+pip install pyinstaller
+```
+
+---
+
+## Building an Executable
+
+PyInstaller creates platform-specific executables. Build on the target platform:
+
+**Windows** (creates `.exe`):
+```batch
+build_exe.bat
+```
+
+**Any platform**:
+```bash
+pyinstaller TurnipText.spec --noconfirm
+```
+
+**Output**: `dist/TurnipText.exe` (Windows) or `dist/TurnipText` (Linux/macOS)
+
+**Key files**:
+- `TurnipText.spec` - PyInstaller configuration (icon, hidden imports, etc.)
+- `build_exe.bat` - Windows convenience script
+- `bin/` - Optional folder for storing built executables
+
+**Note**: The `get_app_dir()` helper ensures settings are stored next to the executable, not in PyInstaller's temp folder.
 
 ---
 
