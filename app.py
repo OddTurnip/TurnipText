@@ -1020,7 +1020,15 @@ class TextEditorWindow(QMainWindow):
         return None
 
     def mark_tabs_metadata_modified(self):
-        """Mark that tab metadata (emoji/display name) has been modified"""
+        """Mark that tab metadata (emoji/display name) has been modified.
+
+        Only marks as modified if there's an existing .tabs file or tab group name,
+        since otherwise the auto-session handles persistence automatically.
+        """
+        # Only track as "unsaved" if there's a tabs file to save to or a custom name set
+        if not self.current_tabs_file and not self.tab_group_name:
+            return
+
         self.tabs_metadata_modified = True
         self.save_tabs_btn.setText("⚠️ Save Tabs")
         # Override button style with yellow background while preserving structure
