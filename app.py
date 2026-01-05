@@ -25,6 +25,16 @@ from widgets.tab_list import TabListWidget
 from windows.find_replace import FindReplaceDialog
 
 
+def get_app_dir():
+    """Get the application directory - works for both script and frozen exe"""
+    if getattr(sys, 'frozen', False):
+        # Running as compiled exe (PyInstaller)
+        return os.path.dirname(sys.executable)
+    else:
+        # Running as script
+        return os.path.dirname(__file__)
+
+
 class TextEditorWindow(QMainWindow):
     """Main text editor window"""
 
@@ -33,7 +43,7 @@ class TextEditorWindow(QMainWindow):
         self.current_tabs_file = None
         self.last_file_folder = None
         self.last_tabs_folder = None
-        self.settings_file = os.path.join(os.path.dirname(__file__), '.editor_settings.json')
+        self.settings_file = os.path.join(get_app_dir(), '.editor_settings.json')
         self.tabs_metadata_modified = False  # Track if tab metadata (emoji/display name) has changed
         self._initial_splitter_set = False  # Track if initial splitter position has been applied
         self.find_replace_dialog = None  # Will be created when first needed
@@ -68,7 +78,7 @@ class TextEditorWindow(QMainWindow):
         self.setGeometry(100, 100, 1000, 700)
 
         # Set window icon
-        icon_path = os.path.join(os.path.dirname(__file__), 'favicon.ico')
+        icon_path = os.path.join(get_app_dir(), 'favicon.ico')
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
@@ -1580,7 +1590,7 @@ def main():
     app = QApplication(sys.argv)
 
     # Set application icon (for taskbar)
-    icon_path = os.path.join(os.path.dirname(__file__), 'favicon.ico')
+    icon_path = os.path.join(get_app_dir(), 'favicon.ico')
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
 
