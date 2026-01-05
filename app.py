@@ -1603,6 +1603,41 @@ def main():
             tabs_file = None
 
     window = TextEditorWindow(tabs_file)
+
+    # Install global exception handler to prevent crashes from losing unsaved work
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        """Handle uncaught exceptions with a dialog instead of crashing"""
+        import traceback
+
+        # Format the error message
+        error_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
+        error_text = ''.join(error_lines)
+
+        # Log to console
+        print(f"Unhandled exception:\n{error_text}", file=sys.stderr)
+
+        # Show error dialog
+        msg = QMessageBox(window)
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle("Error")
+        msg.setText("An unexpected error occurred.")
+        msg.setInformativeText(
+            "The application encountered an error but hasn't closed.\n"
+            "You can try to save your work before closing."
+        )
+        msg.setDetailedText(error_text)
+        msg.setStandardButtons(
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Close
+        )
+        msg.setDefaultButton(QMessageBox.StandardButton.Ok)
+
+        result = msg.exec()
+        if result == QMessageBox.StandardButton.Close:
+            # User chose to close - trigger normal close which will prompt for unsaved changes
+            window.close()
+
+    sys.excepthook = handle_exception
+
     window.show()
 
     sys.exit(app.exec())
