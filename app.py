@@ -966,11 +966,9 @@ class TextEditorWindow(QMainWindow):
         """Switch to a specific tab"""
         if isinstance(tab, TextEditorTab):
             self.content_stack.setCurrentWidget(tab)
-            # Select in tab list
+            # Update visual selection in tab list (without calling select_tab to avoid recursion)
             for tab_item in self.tab_list.tab_items:
-                if tab_item.editor_tab == tab:
-                    self.tab_list.select_tab(tab_item)
-                    break
+                tab_item.set_selected(tab_item.editor_tab == tab)
             # Notify Find & Replace dialog about the tab switch
             if self.find_replace_dialog and self.find_replace_dialog.isVisible():
                 self.find_replace_dialog.update_current_tab(tab)
