@@ -144,6 +144,24 @@ class TabListWidget(QWidget):
                 break
         self.update_pinned_divider()
 
+    def clear_all_tabs(self):
+        """Remove all tabs from the list (preserves divider and other UI elements)"""
+        # Remove divider from layout first (we'll keep the object)
+        if self.pinned_divider.parent():
+            self.tab_layout.removeWidget(self.pinned_divider)
+        self.pinned_divider.setVisible(False)
+
+        # Remove drop indicator if visible
+        if self.drop_indicator.parent():
+            self.tab_layout.removeWidget(self.drop_indicator)
+        self.drop_indicator.setVisible(False)
+
+        # Delete all tab items
+        for tab_item in self.tab_items:
+            self.tab_layout.removeWidget(tab_item)
+            tab_item.deleteLater()
+        self.tab_items.clear()
+
     def update_pinned_divider(self):
         """Update the position and visibility of the divider between pinned and unpinned tabs"""
         # Count pinned tabs
