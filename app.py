@@ -1495,16 +1495,11 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             # Close all existing tabs
             while self.content_stack.count() > 0:
                 widget = self.content_stack.widget(0)
-                if widget.file_path:
+                if hasattr(widget, 'file_path') and widget.file_path:
                     self._unwatch_file(widget.file_path)
                 self.content_stack.removeWidget(widget)
                 widget.deleteLater()
-            self.tab_list.tab_items.clear()
-            # Clear the tab layout
-            for i in reversed(range(self.tab_list.tab_layout.count())):
-                item = self.tab_list.tab_layout.itemAt(i)
-                if item.widget():
-                    item.widget().deleteLater()
+            self.tab_list.clear_all_tabs()
 
             # Set the new group location
             self.current_tabs_file = file_path
@@ -1663,14 +1658,11 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             # Close all existing tabs
             while self.content_stack.count() > 0:
                 widget = self.content_stack.widget(0)
+                if hasattr(widget, 'file_path') and widget.file_path:
+                    self._unwatch_file(widget.file_path)
                 self.content_stack.removeWidget(widget)
                 widget.deleteLater()
-            self.tab_list.tab_items.clear()
-            # Clear the tab layout
-            for i in reversed(range(self.tab_list.tab_layout.count())):
-                item = self.tab_list.tab_layout.itemAt(i)
-                if item.widget():
-                    item.widget().deleteLater()
+            self.tab_list.clear_all_tabs()
 
             # Load tab group name if present
             self.tab_group_name = root.get('name')  # May be None
