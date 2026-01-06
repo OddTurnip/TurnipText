@@ -8,8 +8,6 @@ import sys
 import os
 import json
 from pathlib import Path
-import xml.etree.ElementTree as ET
-from xml.dom import minidom
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMessageBox, QWidget,
@@ -29,6 +27,7 @@ from windows.dialogs import (
     UnsavedChangesDialog, UnsavedGroupDialog, GroupChangeWarningDialog
 )
 from styles import BUTTON_STYLE, MODIFIED_BUTTON_STYLE
+from managers.tab_groups import TabGroupManager, get_tabs_data_from_widgets
 
 
 def get_app_dir():
@@ -56,15 +55,14 @@ class TextEditorWindow(QMainWindow):
 
     def __init__(self, tabs_file=None):
         super().__init__()
-        self.current_tabs_file = None
         self.last_file_folder = None
         self.last_tabs_folder = None
         self.settings_file = os.path.join(get_app_dir(), '.editor_settings.json')
-        self.tab_group_name = None  # Custom name for the tab group (used as window title)
-        self._baseline_tab_state = None  # Baseline state for comparison (set when loading/saving .tabs)
         self._initial_splitter_set = False  # Track if initial splitter position has been applied
         self.find_replace_dialog = None  # Will be created when first needed
-        self.recent_groups = []  # List of recently loaded .tabs files (max 10)
+
+        # Tab group manager handles save/load operations and state tracking
+        self.tab_group_manager = TabGroupManager()
 
         # File system watcher for detecting external changes
         self.file_watcher = QFileSystemWatcher(self)
@@ -439,8 +437,8 @@ class TextEditorWindow(QMainWindow):
             return self.last_tabs_folder
 
         # Otherwise, use the current tabs file location
-        if self.current_tabs_file:
-            folder = os.path.dirname(self.current_tabs_file)
+        if self.tab_group_manager.current_tabs_file:
+            folder = os.path.dirname(self.tab_group_manager.current_tabs_file)
             if os.path.exists(folder):
                 return folder
 
@@ -697,8 +695,8 @@ class TextEditorWindow(QMainWindow):
                     saved_count += 1
 
         # Also save the group if there's a location
-        if self.current_tabs_file:
-            self.save_tabs(self.current_tabs_file)
+        if self.tab_group_manager.current_tabs_file:
+            self.save_tabs(self.tab_group_manager.current_tabs_file)
 
         # Update last saved timestamp if anything was saved
         if saved_count > 0:
@@ -734,7 +732,7 @@ class TextEditorWindow(QMainWindow):
                 break
 
         # Check for unsaved group changes
-        has_unsaved_group = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
+        has_unsaved_group = (self.tab_group_manager.current_tabs_file or self.tab_group_manager.tab_group_name) and self._has_tab_state_changed()
 
         has_unsaved = has_unsaved_files or has_unsaved_group
 
@@ -1022,7 +1020,7 @@ class TextEditorWindow(QMainWindow):
     def _get_current_tab_state(self):
         """Get a snapshot of the current tab state for comparison."""
         state = {
-            'tab_group_name': self.tab_group_name,
+            'tab_group_name': self.tab_group_manager.tab_group_name,
             'tabs': []
         }
         for i in range(self.content_stack.count()):
@@ -1044,18 +1042,16 @@ class TextEditorWindow(QMainWindow):
 
     def _set_baseline_tab_state(self):
         """Set the baseline state to compare against."""
-        self._baseline_tab_state = self._get_current_tab_state()
+        self.tab_group_manager.set_baseline_state(self._get_current_tab_state())
 
     def _has_tab_state_changed(self):
         """Check if the current tab state differs from the baseline."""
-        if self._baseline_tab_state is None:
-            return False
-        return self._get_current_tab_state() != self._baseline_tab_state
+        return self.tab_group_manager.has_state_changed(self._get_current_tab_state())
 
     def update_save_group_button(self):
         """Update the Save Group button appearance based on whether state has changed."""
         # Only show as modified if there's a tabs file or tab group name to save to
-        has_changes = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
+        has_changes = (self.tab_group_manager.current_tabs_file or self.tab_group_manager.tab_group_name) and self._has_tab_state_changed()
 
         if has_changes:
             self.save_group_btn.setText("⚠️ Save Group")
@@ -1077,22 +1073,13 @@ class TextEditorWindow(QMainWindow):
 
     def update_window_title(self):
         """Update the window title based on tab group name or current tabs file"""
-        if self.tab_group_name:
-            self.setWindowTitle(self.tab_group_name)
-        elif self.current_tabs_file:
-            filename = os.path.basename(self.current_tabs_file)
-            # Remove .tabs extension for display
-            if filename.endswith('.tabs'):
-                filename = filename[:-5]
-            self.setWindowTitle(filename)
-        else:
-            self.setWindowTitle("TurnipText")
+        self.setWindowTitle(self.tab_group_manager.get_window_title())
 
     def edit_tabs_dialog(self):
         """Show dialog to edit tab group name"""
-        dialog = EditGroupDialog(self.tab_group_name, self.current_tabs_file, self)
+        dialog = EditGroupDialog(self.tab_group_manager.tab_group_name, self.tab_group_manager.current_tabs_file, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.tab_group_name = dialog.get_result()
+            self.tab_group_manager.tab_group_name = dialog.get_result()
             self.update_window_title()
             self.mark_tabs_metadata_modified()
 
@@ -1138,8 +1125,8 @@ class TextEditorWindow(QMainWindow):
             self.tab_list.clear_all_tabs()
 
             # Set the new group location
-            self.current_tabs_file = file_path
-            self.tab_group_name = None
+            self.tab_group_manager.current_tabs_file = file_path
+            self.tab_group_manager.tab_group_name = None
 
             # Update window title
             self.update_window_title()
@@ -1149,9 +1136,9 @@ class TextEditorWindow(QMainWindow):
 
     def save_group(self):
         """Save tab group to current location without prompting"""
-        if self.current_tabs_file:
+        if self.tab_group_manager.current_tabs_file:
             # We have a location, save directly
-            self.save_tabs(self.current_tabs_file)
+            self.save_tabs(self.tab_group_manager.current_tabs_file)
         else:
             # No location yet, prompt for one
             self.save_group_as_dialog()
@@ -1208,65 +1195,39 @@ class TextEditorWindow(QMainWindow):
 
     def save_tabs(self, tabs_file_path):
         """Save all open tabs to an XML file"""
-        # Create XML structure
-        root = ET.Element('tabs')
-        root.set('version', '1.0')
+        # Extract tabs data from widgets
+        tabs_data = get_tabs_data_from_widgets(
+            self.content_stack, self.tab_list, TextEditorTab
+        )
 
-        # Save tab group name if set
-        if self.tab_group_name:
-            root.set('name', self.tab_group_name)
-
-        # Determine current tab
+        # Determine current tab index
         current_tab = self.get_current_tab()
         current_index = 0
-        tab_count = 0
+        for i, tab_data in enumerate(tabs_data):
+            # Find widget with matching path
+            for j in range(self.content_stack.count()):
+                widget = self.content_stack.widget(j)
+                if isinstance(widget, TextEditorTab) and widget.file_path == tab_data['path']:
+                    if widget == current_tab:
+                        current_index = i
+                    break
 
-        # Save all tabs (pinned tabs are already at the top in tab_list)
-        for i in range(self.content_stack.count()):
-            widget = self.content_stack.widget(i)
-            if isinstance(widget, TextEditorTab) and widget.file_path:
-                tab_elem = ET.SubElement(root, 'tab')
-                tab_elem.set('path', widget.file_path)
-                tab_elem.set('pinned', str(widget.is_pinned))
+        # Save using the manager
+        if self.tab_group_manager.save_tabs_to_file(tabs_file_path, tabs_data, current_index):
+            # Update window title
+            self.update_window_title()
 
-                # Save custom emoji, icon, and display name if set
-                for tab_item in self.tab_list.tab_items:
-                    if tab_item.editor_tab == widget:
-                        if tab_item.custom_icon:
-                            tab_elem.set('icon', tab_item.custom_icon)
-                        if tab_item.custom_emoji:
-                            tab_elem.set('emoji', tab_item.custom_emoji)
-                        if tab_item.custom_display_name:
-                            tab_elem.set('display_name', tab_item.custom_display_name)
-                        break
+            # Update last saved timestamp
+            timestamp = self.tab_group_manager.get_last_saved_timestamp()
+            self.last_saved_label.setText(f"Saved group {timestamp}")
+            self.last_saved_label.setVisible(True)
 
-                if widget == current_tab:
-                    current_index = tab_count
-                tab_count += 1
+            # Set baseline state and update button appearance
+            self._set_baseline_tab_state()
+            self.update_save_group_button()
 
-        root.set('current', str(current_index))
-
-        # Write XML to file with pretty formatting
-        xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
-        with open(tabs_file_path, 'w', encoding='utf-8') as f:
-            f.write(xml_str)
-
-        # Update current tabs file and window title
-        self.current_tabs_file = tabs_file_path
-        self.update_window_title()
-
-        # Update last saved timestamp
-        from datetime import datetime
-        current_time = datetime.now().strftime("%H:%M")
-        self.last_saved_label.setText(f"Saved group {current_time}")
-        self.last_saved_label.setVisible(True)
-
-        # Set baseline state and update button appearance
-        self._set_baseline_tab_state()
-        self.update_save_group_button()
-
-        # Add to recent groups history
-        self.add_to_recent_groups(tabs_file_path)
+            # Update history combo
+            self.update_history_combo()
 
     def _check_unsaved_before_group_change(self):
         """Check for unsaved changes before switching groups. Returns True if safe to proceed."""
@@ -1281,12 +1242,12 @@ class TextEditorWindow(QMainWindow):
                     unsaved_files.append("Untitled")
 
         # Check for unsaved group changes
-        has_group_changes = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
+        has_group_changes = (self.tab_group_manager.current_tabs_file or self.tab_group_manager.tab_group_name) and self._has_tab_state_changed()
 
         if not unsaved_files and not has_group_changes:
             return True  # No unsaved changes, safe to proceed
 
-        group_name = self.tab_group_name or os.path.basename(self.current_tabs_file or "current group")
+        group_name = self.tab_group_manager.tab_group_name or os.path.basename(self.tab_group_manager.current_tabs_file or "current group")
         dialog = GroupChangeWarningDialog(unsaved_files, has_group_changes, group_name, self)
         result = dialog.exec()
 
@@ -1320,98 +1281,81 @@ class TextEditorWindow(QMainWindow):
 
     def load_tabs(self, tabs_file_path):
         """Load tabs from an XML file"""
-        try:
-            # Parse XML file
-            tree = ET.parse(tabs_file_path)
-            root = tree.getroot()
+        # Load data using the manager
+        tabs_data, current_index, group_name = self.tab_group_manager.load_tabs_from_file(tabs_file_path)
 
-            # Close all existing tabs
-            while self.content_stack.count() > 0:
-                widget = self.content_stack.widget(0)
-                if hasattr(widget, 'file_path') and widget.file_path:
-                    self._unwatch_file(widget.file_path)
-                self.content_stack.removeWidget(widget)
-                widget.deleteLater()
-            self.tab_list.clear_all_tabs()
+        if tabs_data is None:
+            QMessageBox.critical(self, "Error", f"Failed to load tabs from:\n{tabs_file_path}")
+            return
 
-            # Load tab group name if present
-            self.tab_group_name = root.get('name')  # May be None
+        # Close all existing tabs
+        while self.content_stack.count() > 0:
+            widget = self.content_stack.widget(0)
+            if hasattr(widget, 'file_path') and widget.file_path:
+                self._unwatch_file(widget.file_path)
+            self.content_stack.removeWidget(widget)
+            widget.deleteLater()
+        self.tab_list.clear_all_tabs()
 
-            # Get current tab index
-            current_index = int(root.get('current', '0'))
-            loaded_tabs = []
+        loaded_tabs = []
 
-            # Load each tab
-            for tab_elem in root.findall('tab'):
-                file_path = tab_elem.get('path')
-                is_pinned = tab_elem.get('pinned', 'False') == 'True'
-                custom_icon = tab_elem.get('icon')  # May be None
-                custom_emoji = tab_elem.get('emoji')  # May be None
-                custom_display_name = tab_elem.get('display_name')  # May be None
+        # Create widgets for each tab
+        for tab_data in tabs_data:
+            file_path = tab_data['path']
 
-                if os.path.exists(file_path):
-                    tab = TextEditorTab(file_path)
-                    tab.is_pinned = is_pinned
+            # Only load tabs for existing files
+            if not tab_data.get('exists', os.path.exists(file_path)):
+                continue
 
-                    # Add to content stack and tab list
-                    self.content_stack.addWidget(tab)
-                    tab_item = self.tab_list.add_tab(tab)
-                    self.apply_markdown_to_tab(tab)
-                    self.apply_line_numbers_to_tab(tab)
-                    self.apply_monospace_to_tab(tab)
-                    self._watch_file(file_path)
+            tab = TextEditorTab(file_path)
+            tab.is_pinned = tab_data.get('pinned', False)
 
-                    # Set custom icon, emoji and display name if they were saved
-                    if custom_icon:
-                        tab_item.custom_icon = custom_icon
-                    if custom_emoji:
-                        tab_item.custom_emoji = custom_emoji
-                    if custom_display_name:
-                        tab_item.custom_display_name = custom_display_name
-                    if custom_icon or custom_emoji or custom_display_name:
-                        tab_item.update_display()
+            # Add to content stack and tab list
+            self.content_stack.addWidget(tab)
+            tab_item = self.tab_list.add_tab(tab)
+            self.apply_markdown_to_tab(tab)
+            self.apply_line_numbers_to_tab(tab)
+            self.apply_monospace_to_tab(tab)
+            self._watch_file(file_path)
 
-                    loaded_tabs.append(tab)
+            # Set custom icon, emoji and display name if they were saved
+            custom_icon = tab_data.get('icon')
+            custom_emoji = tab_data.get('emoji')
+            custom_display_name = tab_data.get('display_name')
 
-            # Set current tab
-            if current_index < len(loaded_tabs):
-                current_tab = loaded_tabs[current_index]
-                self.switch_to_tab(current_tab)
-                # Select in tab list
-                for tab_item in self.tab_list.tab_items:
-                    if tab_item.editor_tab == current_tab:
-                        self.tab_list.select_tab(tab_item)
-                        break
+            if custom_icon:
+                tab_item.custom_icon = custom_icon
+            if custom_emoji:
+                tab_item.custom_emoji = custom_emoji
+            if custom_display_name:
+                tab_item.custom_display_name = custom_display_name
+            if custom_icon or custom_emoji or custom_display_name:
+                tab_item.update_display()
 
-            # Update current tabs file and window title
-            self.current_tabs_file = tabs_file_path
-            self.update_window_title()
+            loaded_tabs.append(tab)
 
-            # Set baseline state for change tracking
-            self._set_baseline_tab_state()
+        # Set current tab
+        if current_index < len(loaded_tabs):
+            current_tab = loaded_tabs[current_index]
+            self.switch_to_tab(current_tab)
+            # Select in tab list
+            for tab_item in self.tab_list.tab_items:
+                if tab_item.editor_tab == current_tab:
+                    self.tab_list.select_tab(tab_item)
+                    break
 
-            # Add to recent groups history
-            self.add_to_recent_groups(tabs_file_path)
+        # Update window title
+        self.update_window_title()
 
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load tabs:\n{str(e)}")
+        # Set baseline state for change tracking
+        self._set_baseline_tab_state()
+
+        # Update history combo
+        self.update_history_combo()
 
     def add_to_recent_groups(self, tabs_file_path):
         """Add a tabs file to the recent groups history"""
-        # Convert to absolute path
-        tabs_file_path = os.path.abspath(tabs_file_path)
-
-        # Remove if already in list (to move it to the top)
-        if tabs_file_path in self.recent_groups:
-            self.recent_groups.remove(tabs_file_path)
-
-        # Add to the beginning
-        self.recent_groups.insert(0, tabs_file_path)
-
-        # Keep only the 10 most recent
-        self.recent_groups = self.recent_groups[:10]
-
-        # Update the combo box
+        self.tab_group_manager.add_to_recent_groups(tabs_file_path)
         self.update_history_combo()
 
     def update_history_combo(self):
@@ -1421,9 +1365,9 @@ class TextEditorWindow(QMainWindow):
 
         self.history_combo.clear()
 
-        if self.recent_groups:
+        if self.tab_group_manager.recent_groups:
             self.history_combo.setEnabled(True)
-            for path in self.recent_groups:
+            for path in self.tab_group_manager.recent_groups:
                 # Show just the filename without extension
                 filename = os.path.basename(path)
                 if filename.endswith('.tabs'):
@@ -1436,19 +1380,19 @@ class TextEditorWindow(QMainWindow):
             self.history_combo.setEnabled(False)
 
         # Reset to first item (or -1 for placeholder)
-        self.history_combo.setCurrentIndex(0 if self.recent_groups else -1)
+        self.history_combo.setCurrentIndex(0 if self.tab_group_manager.recent_groups else -1)
 
         self.history_combo.blockSignals(False)
 
     def _on_history_selected(self, index):
         """Handle selection from history dropdown"""
-        if index < 0 or not self.recent_groups:
+        if index < 0 or not self.tab_group_manager.recent_groups:
             return
 
         path = self.history_combo.itemData(index)
         if path and os.path.exists(path):
             # Don't reload if it's the current file
-            if path != self.current_tabs_file:
+            if path != self.tab_group_manager.current_tabs_file:
                 # Check for unsaved changes first
                 if not self._check_unsaved_before_group_change():
                     # User cancelled - reset combo to current group
@@ -1462,7 +1406,7 @@ class TextEditorWindow(QMainWindow):
                 "File Not Found",
                 f"The group file no longer exists:\n{path}\n\nIt will be removed from history."
             )
-            self.recent_groups.remove(path)
+            self.tab_group_manager.recent_groups.remove(path)
             self.update_history_combo()
 
     def save_settings(self):
@@ -1476,19 +1420,19 @@ class TextEditorWindow(QMainWindow):
             },
             'last_file_folder': self.last_file_folder,
             'last_tabs_folder': self.last_tabs_folder,
-            'current_tabs_file': self.current_tabs_file,
+            'current_tabs_file': self.tab_group_manager.current_tabs_file,
             'view_mode': self.tab_list.view_mode,
             'render_markdown': self.render_markdown_checkbox.isChecked(),
             'line_numbers': self.line_numbers_checkbox.isChecked(),
             'monospace': self.monospace_checkbox.isChecked(),
-            'recent_groups': self.recent_groups
+            'recent_groups': self.tab_group_manager.recent_groups
         }
 
         # Auto-save current session
         auto_session = {
             'tabs': [],
             'current_index': 0,
-            'tab_group_name': self.tab_group_name
+            'tab_group_name': self.tab_group_manager.tab_group_name
         }
 
         current_tab = self.get_current_tab()
@@ -1558,7 +1502,7 @@ class TextEditorWindow(QMainWindow):
             # Restore last folders
             self.last_file_folder = settings.get('last_file_folder')
             self.last_tabs_folder = settings.get('last_tabs_folder')
-            self.current_tabs_file = settings.get('current_tabs_file')
+            self.tab_group_manager.current_tabs_file = settings.get('current_tabs_file')
 
             # Restore view mode (this will set the correct splitter size)
             view_mode = settings.get('view_mode', 'normal')
@@ -1577,12 +1521,12 @@ class TextEditorWindow(QMainWindow):
             self.monospace_checkbox.setChecked(monospace)
 
             # Restore recent groups history
-            self.recent_groups = settings.get('recent_groups', [])
+            self.tab_group_manager.recent_groups = settings.get('recent_groups', [])
             # Filter out any files that no longer exist
-            self.recent_groups = [p for p in self.recent_groups if os.path.exists(p)]
+            self.tab_group_manager.filter_nonexistent_groups()
             self.update_history_combo()
 
-            if self.current_tabs_file:
+            if self.tab_group_manager.current_tabs_file:
                 self.update_window_title()
 
         except Exception as e:
@@ -1606,8 +1550,8 @@ class TextEditorWindow(QMainWindow):
             loaded_tabs = []
 
             # Restore tab group name if present
-            self.tab_group_name = auto_session.get('tab_group_name')
-            if self.tab_group_name:
+            self.tab_group_manager.tab_group_name = auto_session.get('tab_group_name')
+            if self.tab_group_manager.tab_group_name:
                 self.update_window_title()
 
             # Load each tab
@@ -1654,7 +1598,7 @@ class TextEditorWindow(QMainWindow):
                         break
 
             # Set baseline state if there's a tabs file to track changes against
-            if self.current_tabs_file:
+            if self.tab_group_manager.current_tabs_file:
                 self._set_baseline_tab_state()
 
         except Exception as e:
@@ -1697,12 +1641,12 @@ class TextEditorWindow(QMainWindow):
             # EXIT_WITHOUT_SAVING - just continue
 
         # Check for unsaved tab group changes
-        has_tab_changes = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
+        has_tab_changes = (self.tab_group_manager.current_tabs_file or self.tab_group_manager.tab_group_name) and self._has_tab_state_changed()
         if has_tab_changes:
             # Determine tab group name for display
-            group_name = self.tab_group_name
-            if not group_name and self.current_tabs_file:
-                filename = os.path.basename(self.current_tabs_file)
+            group_name = self.tab_group_manager.tab_group_name
+            if not group_name and self.tab_group_manager.current_tabs_file:
+                filename = os.path.basename(self.tab_group_manager.current_tabs_file)
                 group_name = filename[:-5] if filename.endswith('.tabs') else filename
             if not group_name:
                 group_name = "Current Tab Group"
@@ -1714,8 +1658,8 @@ class TextEditorWindow(QMainWindow):
                 event.ignore()
                 return
             elif result == UnsavedGroupDialog.SAVE_GROUP:
-                if self.current_tabs_file:
-                    self.save_tabs(self.current_tabs_file)
+                if self.tab_group_manager.current_tabs_file:
+                    self.save_tabs(self.tab_group_manager.current_tabs_file)
                 else:
                     self.save_group_as_dialog()
                     # Check if save was cancelled (state still differs from baseline)
