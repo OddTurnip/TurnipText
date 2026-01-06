@@ -158,11 +158,7 @@ class TextEditorWindow(QMainWindow):
         toolbar_main_layout.setContentsMargins(8, 8, 8, 8)
         toolbar_main_layout.setSpacing(5)
 
-        # First row: file operations
-        toolbar_row1 = QHBoxLayout()
-        toolbar_row1.setSpacing(8)
-
-        # Define button style for top row
+        # Define button style
         button_style = """
             QPushButton {
                 background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -184,6 +180,21 @@ class TextEditorWindow(QMainWindow):
                 border: 1px solid #808080;
             }
         """
+
+        # Store the default button style for later use
+        self.default_button_style = button_style
+
+        # Label style
+        label_style = "font-weight: bold; margin-right: 5px;"
+
+        # First row: Tabs (file operations)
+        toolbar_row1 = QHBoxLayout()
+        toolbar_row1.setSpacing(8)
+
+        # Tabs label
+        tabs_label = QLabel("Tabs:")
+        tabs_label.setStyleSheet(label_style)
+        toolbar_row1.addWidget(tabs_label)
 
         # New button
         new_btn = QPushButton("📄 New")
@@ -213,39 +224,7 @@ class TextEditorWindow(QMainWindow):
         self.save_all_btn.setStyleSheet(button_style)
         toolbar_row1.addWidget(self.save_all_btn)
 
-        # Separator
-        toolbar_row1.addSpacing(20)
-
-        # Load Tabs button
-        load_tabs_btn = QPushButton("📋 Load Tabs")
-        load_tabs_btn.setToolTip("Load tab session")
-        load_tabs_btn.clicked.connect(self.load_tabs_dialog)
-        load_tabs_btn.setStyleSheet(button_style)
-        toolbar_row1.addWidget(load_tabs_btn)
-
-        # Save Tabs button
-        self.save_tabs_btn = QPushButton("💾 Save Tabs")
-        self.save_tabs_btn.setToolTip("Save tab session")
-        self.save_tabs_btn.clicked.connect(self.save_tabs_dialog)
-        self.save_tabs_btn.setStyleSheet(button_style)
-        toolbar_row1.addWidget(self.save_tabs_btn)
-
-        # Edit Tabs button
-        edit_tabs_btn = QPushButton("✏️ Edit Tabs")
-        edit_tabs_btn.setToolTip("Edit tab group name")
-        edit_tabs_btn.clicked.connect(self.edit_tabs_dialog)
-        edit_tabs_btn.setStyleSheet(button_style)
-        toolbar_row1.addWidget(edit_tabs_btn)
-
-        # Store the default button style for later use
-        self.default_button_style = button_style
-
-        # Last saved labels
-        self.last_saved_label = QLabel("")
-        self.last_saved_label.setStyleSheet("color: #666666; font-style: italic; margin-left: 10px;")
-        self.last_saved_label.setVisible(False)  # Hidden until first save
-        toolbar_row1.addWidget(self.last_saved_label)
-
+        # Last saved all label
         self.last_saved_all_label = QLabel("")
         self.last_saved_all_label.setStyleSheet("color: #666666; font-style: italic; margin-left: 10px;")
         self.last_saved_all_label.setVisible(False)  # Hidden until first save
@@ -264,18 +243,79 @@ class TextEditorWindow(QMainWindow):
         toolbar_main_layout.addLayout(toolbar_row1)
 
         # Add divider between rows
-        divider = QFrame()
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet("background-color: #888888; min-height: 1px; max-height: 1px;")
-        toolbar_main_layout.addWidget(divider)
+        divider1 = QFrame()
+        divider1.setFrameShape(QFrame.Shape.HLine)
+        divider1.setStyleSheet("background-color: #888888; min-height: 1px; max-height: 1px;")
+        toolbar_main_layout.addWidget(divider1)
 
-        # Second row: view mode controls
+        # Second row: Groups (tab session operations)
         toolbar_row2 = QHBoxLayout()
-        toolbar_row2.setSpacing(5)
+        toolbar_row2.setSpacing(8)
+
+        # Groups label
+        groups_label = QLabel("Groups:")
+        groups_label.setStyleSheet(label_style)
+        toolbar_row2.addWidget(groups_label)
+
+        # New Group button
+        new_group_btn = QPushButton("📄 New Group")
+        new_group_btn.setToolTip("Create a new tab group")
+        new_group_btn.clicked.connect(self.new_group_dialog)
+        new_group_btn.setStyleSheet(button_style)
+        toolbar_row2.addWidget(new_group_btn)
+
+        # Load Group button
+        load_group_btn = QPushButton("📂 Load Group")
+        load_group_btn.setToolTip("Load tab group")
+        load_group_btn.clicked.connect(self.load_tabs_dialog)
+        load_group_btn.setStyleSheet(button_style)
+        toolbar_row2.addWidget(load_group_btn)
+
+        # Save Group button
+        self.save_group_btn = QPushButton("💾 Save Group")
+        self.save_group_btn.setToolTip("Save tab group")
+        self.save_group_btn.clicked.connect(self.save_group)
+        self.save_group_btn.setStyleSheet(button_style)
+        toolbar_row2.addWidget(self.save_group_btn)
+
+        # Save Group As button
+        save_group_as_btn = QPushButton("💾 Save Group As")
+        save_group_as_btn.setToolTip("Save tab group to a new location")
+        save_group_as_btn.clicked.connect(self.save_group_as_dialog)
+        save_group_as_btn.setStyleSheet(button_style)
+        toolbar_row2.addWidget(save_group_as_btn)
+
+        # Edit Group button
+        edit_group_btn = QPushButton("✏️ Edit Group")
+        edit_group_btn.setToolTip("Edit tab group name")
+        edit_group_btn.clicked.connect(self.edit_tabs_dialog)
+        edit_group_btn.setStyleSheet(button_style)
+        toolbar_row2.addWidget(edit_group_btn)
+
+        # Last saved label for groups
+        self.last_saved_label = QLabel("")
+        self.last_saved_label.setStyleSheet("color: #666666; font-style: italic; margin-left: 10px;")
+        self.last_saved_label.setVisible(False)  # Hidden until first save
+        toolbar_row2.addWidget(self.last_saved_label)
+
+        # Add stretch to push buttons to the left
+        toolbar_row2.addStretch()
+
+        toolbar_main_layout.addLayout(toolbar_row2)
+
+        # Add divider between rows
+        divider2 = QFrame()
+        divider2.setFrameShape(QFrame.Shape.HLine)
+        divider2.setStyleSheet("background-color: #888888; min-height: 1px; max-height: 1px;")
+        toolbar_main_layout.addWidget(divider2)
+
+        # Third row: view mode controls
+        toolbar_row3 = QHBoxLayout()
+        toolbar_row3.setSpacing(5)
 
         # View mode label
         view_label = QLabel("Tab View:")
-        toolbar_row2.addWidget(view_label)
+        toolbar_row3.addWidget(view_label)
 
         # View mode buttons
         self.minimize_btn = QPushButton("📋")
@@ -283,7 +323,7 @@ class TextEditorWindow(QMainWindow):
         self.minimize_btn.setMaximumWidth(30)
         self.minimize_btn.setCheckable(True)
         self.minimize_btn.clicked.connect(lambda: self.set_tab_view_mode('minimized'))
-        toolbar_row2.addWidget(self.minimize_btn)
+        toolbar_row3.addWidget(self.minimize_btn)
 
         self.normal_btn = QPushButton("📑")
         self.normal_btn.setToolTip("Normal view (emoji + filename)")
@@ -291,64 +331,64 @@ class TextEditorWindow(QMainWindow):
         self.normal_btn.setCheckable(True)
         self.normal_btn.setChecked(True)  # Default mode
         self.normal_btn.clicked.connect(lambda: self.set_tab_view_mode('normal'))
-        toolbar_row2.addWidget(self.normal_btn)
+        toolbar_row3.addWidget(self.normal_btn)
 
         self.maximize_btn = QPushButton("📊")
         self.maximize_btn.setToolTip("Maximize tabs (emoji + filename + modified time)")
         self.maximize_btn.setMaximumWidth(30)
         self.maximize_btn.setCheckable(True)
         self.maximize_btn.clicked.connect(lambda: self.set_tab_view_mode('maximized'))
-        toolbar_row2.addWidget(self.maximize_btn)
+        toolbar_row3.addWidget(self.maximize_btn)
 
         # Separator
-        toolbar_row2.addSpacing(20)
+        toolbar_row3.addSpacing(20)
 
         # Edit tab button
         self.edit_emoji_btn = QPushButton("✏️ Edit Tab")
         self.edit_emoji_btn.setToolTip("Edit emoji and display name for selected tab")
         self.edit_emoji_btn.clicked.connect(self.edit_selected_emoji)
-        toolbar_row2.addWidget(self.edit_emoji_btn)
+        toolbar_row3.addWidget(self.edit_emoji_btn)
 
         # Find and Replace button
         self.find_replace_btn = QPushButton("🔍 Find && Replace")
         self.find_replace_btn.setToolTip("Find and replace text (Ctrl+F)")
         self.find_replace_btn.clicked.connect(self.show_find_replace)
-        toolbar_row2.addWidget(self.find_replace_btn)
+        toolbar_row3.addWidget(self.find_replace_btn)
 
         # Separator
-        toolbar_row2.addSpacing(20)
+        toolbar_row3.addSpacing(20)
 
         # Render Markdown checkbox
         self.render_markdown_checkbox = QCheckBox("Render Markdown")
         self.render_markdown_checkbox.setToolTip("Enable markdown syntax highlighting")
         self.render_markdown_checkbox.setChecked(True)  # Default to checked
         self.render_markdown_checkbox.stateChanged.connect(self.toggle_markdown_rendering)
-        toolbar_row2.addWidget(self.render_markdown_checkbox)
+        toolbar_row3.addWidget(self.render_markdown_checkbox)
 
         # Line Numbers checkbox
         self.line_numbers_checkbox = QCheckBox("Line Numbers")
         self.line_numbers_checkbox.setToolTip("Show line numbers and highlight current line")
         self.line_numbers_checkbox.setChecked(True)  # Default to checked
         self.line_numbers_checkbox.stateChanged.connect(self.toggle_line_numbers)
-        toolbar_row2.addWidget(self.line_numbers_checkbox)
+        toolbar_row3.addWidget(self.line_numbers_checkbox)
 
         # Monospace checkbox
         self.monospace_checkbox = QCheckBox("Monospace")
         self.monospace_checkbox.setToolTip("Use monospace font (Consolas) for editing")
         self.monospace_checkbox.setChecked(False)  # Default to unchecked (use system default)
         self.monospace_checkbox.stateChanged.connect(self.toggle_monospace_font)
-        toolbar_row2.addWidget(self.monospace_checkbox)
+        toolbar_row3.addWidget(self.monospace_checkbox)
 
         # Add stretch to push buttons to the left
-        toolbar_row2.addStretch()
+        toolbar_row3.addStretch()
 
-        toolbar_main_layout.addLayout(toolbar_row2)
+        toolbar_main_layout.addLayout(toolbar_row3)
 
-        # Add divider after second row
-        divider2 = QFrame()
-        divider2.setFrameShape(QFrame.Shape.HLine)
-        divider2.setStyleSheet("background-color: #888888; min-height: 1px; max-height: 1px;")
-        toolbar_main_layout.addWidget(divider2)
+        # Add divider after third row
+        divider3 = QFrame()
+        divider3.setFrameShape(QFrame.Shape.HLine)
+        divider3.setStyleSheet("background-color: #888888; min-height: 1px; max-height: 1px;")
+        toolbar_main_layout.addWidget(divider3)
 
         toolbar.setLayout(toolbar_main_layout)
         layout.addWidget(toolbar)
@@ -1123,13 +1163,13 @@ class TextEditorWindow(QMainWindow):
             return False
         return self._get_current_tab_state() != self._baseline_tab_state
 
-    def update_save_tabs_button(self):
-        """Update the Save Tabs button appearance based on whether state has changed."""
+    def update_save_group_button(self):
+        """Update the Save Group button appearance based on whether state has changed."""
         # Only show as modified if there's a tabs file or tab group name to save to
         has_changes = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
 
         if has_changes:
-            self.save_tabs_btn.setText("⚠️ Save Tabs")
+            self.save_group_btn.setText("⚠️ Save Group")
             # Override button style with yellow background
             modified_style = """
                 QPushButton {
@@ -1152,14 +1192,14 @@ class TextEditorWindow(QMainWindow):
                     border: 1px solid #E65100;
                 }
             """
-            self.save_tabs_btn.setStyleSheet(modified_style)
+            self.save_group_btn.setStyleSheet(modified_style)
         else:
-            self.save_tabs_btn.setText("💾 Save Tabs")
-            self.save_tabs_btn.setStyleSheet(self.default_button_style)
+            self.save_group_btn.setText("💾 Save Group")
+            self.save_group_btn.setStyleSheet(self.default_button_style)
 
     def mark_tabs_metadata_modified(self):
         """Called when tab metadata may have changed - updates button state."""
-        self.update_save_tabs_button()
+        self.update_save_group_button()
 
     def update_tab_title(self, tab):
         """Update the title of a tab"""
@@ -1365,8 +1405,84 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
         dialog.setMinimumWidth(450)
         dialog.exec()
 
-    def save_tabs_dialog(self):
-        """Show dialog to save current tabs"""
+    def new_group_dialog(self):
+        """Create a new tab group - closes all tabs and prompts for save location"""
+        # Check for unsaved changes before closing
+        modified_tabs = []
+        for i in range(self.content_stack.count()):
+            widget = self.content_stack.widget(i)
+            if isinstance(widget, TextEditorTab) and widget.is_modified:
+                file_name = os.path.basename(widget.file_path) if widget.file_path else "Untitled"
+                modified_tabs.append(file_name)
+
+        if modified_tabs:
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                "The following files have unsaved changes:\n\n" +
+                "\n".join(f"  • {name}" for name in modified_tabs) +
+                "\n\nDo you want to discard them and create a new group?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
+
+        # Prompt for save location for the new group
+        default_folder = self.get_default_tabs_folder()
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Create New Group",
+            default_folder,
+            "Tabs Files (*.tabs)"
+        )
+
+        if file_path:
+            # Ensure .tabs extension
+            if not file_path.endswith('.tabs'):
+                file_path += '.tabs'
+
+            # Convert to absolute path
+            file_path = os.path.abspath(file_path)
+
+            # Update last tabs folder
+            self.last_tabs_folder = os.path.dirname(file_path)
+
+            # Close all existing tabs
+            while self.content_stack.count() > 0:
+                widget = self.content_stack.widget(0)
+                if widget.file_path:
+                    self._unwatch_file(widget.file_path)
+                self.content_stack.removeWidget(widget)
+                widget.deleteLater()
+            self.tab_list.tab_items.clear()
+            # Clear the tab layout
+            for i in reversed(range(self.tab_list.tab_layout.count())):
+                item = self.tab_list.tab_layout.itemAt(i)
+                if item.widget():
+                    item.widget().deleteLater()
+
+            # Set the new group location
+            self.current_tabs_file = file_path
+            self.tab_group_name = None
+
+            # Update window title
+            self.update_window_title()
+
+            # Save the empty group
+            self.save_tabs(file_path)
+
+    def save_group(self):
+        """Save tab group to current location without prompting"""
+        if self.current_tabs_file:
+            # We have a location, save directly
+            self.save_tabs(self.current_tabs_file)
+        else:
+            # No location yet, prompt for one
+            self.save_group_as_dialog()
+
+    def save_group_as_dialog(self):
+        """Show dialog to save tab group to a new location"""
         # Check for unsaved or untitled documents
         unsaved_files = []
         for i in range(self.content_stack.count()):
@@ -1379,7 +1495,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
 
         # Warn if there are unsaved files
         if unsaved_files:
-            message = "The following documents will be excluded from the saved tabs:\n\n"
+            message = "The following documents will be excluded from the saved group:\n\n"
             message += "\n".join(f"  • {name}" for name in unsaved_files)
             message += "\n\nDo you want to continue?"
 
@@ -1397,7 +1513,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
 
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Save Tabs",
+            "Save Group As",
             default_folder,
             "Tabs Files (*.tabs)"
         )
@@ -1467,20 +1583,20 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
         # Update last saved timestamp
         from datetime import datetime
         current_time = datetime.now().strftime("%H:%M")
-        self.last_saved_label.setText(f"Saved tabs {current_time}")
+        self.last_saved_label.setText(f"Saved group {current_time}")
         self.last_saved_label.setVisible(True)
 
         # Set baseline state and update button appearance
         self._set_baseline_tab_state()
-        self.update_save_tabs_button()
+        self.update_save_group_button()
 
     def load_tabs_dialog(self):
-        """Show dialog to load tabs"""
+        """Show dialog to load a tab group"""
         default_folder = self.get_default_tabs_folder()
 
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Load Tabs",
+            "Load Group",
             default_folder,
             "Tabs Files (*.tabs)"
         )
@@ -1924,7 +2040,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             cancel_btn.clicked.connect(lambda: dialog.done(0))  # Cancel
             button_layout.addWidget(cancel_btn)
 
-            save_exit_btn = QPushButton("💾 Save Tabs")
+            save_exit_btn = QPushButton("💾 Save Group")
             save_exit_btn.setToolTip("Save tab group and exit")
             save_exit_btn.setStyleSheet(button_style)
             save_exit_btn.clicked.connect(lambda: dialog.done(2))  # Save and exit
@@ -1939,11 +2055,11 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             if result == 0:  # Cancel
                 event.ignore()
                 return
-            elif result == 2:  # Save tabs
+            elif result == 2:  # Save group
                 if self.current_tabs_file:
                     self.save_tabs(self.current_tabs_file)
                 else:
-                    self.save_tabs_dialog()
+                    self.save_group_as_dialog()
                     # Check if save was cancelled (state still differs from baseline)
                     if self._has_tab_state_changed():
                         event.ignore()
