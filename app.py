@@ -6,7 +6,6 @@ Features: Multiple tabs, save/load files, save/load tab sessions
 
 import sys
 import os
-import json
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -28,6 +27,7 @@ from windows.dialogs import (
 )
 from styles import BUTTON_STYLE, MODIFIED_BUTTON_STYLE
 from managers.tab_groups import TabGroupManager, get_tabs_data_from_widgets
+from managers.settings import SettingsManager, get_tabs_data_for_session
 
 
 def get_app_dir():
@@ -57,9 +57,12 @@ class TextEditorWindow(QMainWindow):
         super().__init__()
         self.last_file_folder = None
         self.last_tabs_folder = None
-        self.settings_file = os.path.join(get_app_dir(), '.editor_settings.json')
         self._initial_splitter_set = False  # Track if initial splitter position has been applied
         self.find_replace_dialog = None  # Will be created when first needed
+
+        # Settings manager handles preferences and session persistence
+        settings_file = os.path.join(get_app_dir(), '.editor_settings.json')
+        self.settings_manager = SettingsManager(settings_file)
 
         # Tab group manager handles save/load operations and state tracking
         self.tab_group_manager = TabGroupManager()
@@ -1411,6 +1414,18 @@ class TextEditorWindow(QMainWindow):
 
     def save_settings(self):
         """Save window settings and current session"""
+        # Get current tab index
+        current_tab = self.get_current_tab()
+        tabs_data = get_tabs_data_for_session(self.content_stack, self.tab_list, TextEditorTab)
+        current_index = 0
+        for i, tab_data in enumerate(tabs_data):
+            for j in range(self.content_stack.count()):
+                widget = self.content_stack.widget(j)
+                if isinstance(widget, TextEditorTab) and widget.file_path == tab_data['path']:
+                    if widget == current_tab:
+                        current_index = i
+                    break
+
         settings = {
             'geometry': {
                 'x': self.x(),
@@ -1425,185 +1440,110 @@ class TextEditorWindow(QMainWindow):
             'render_markdown': self.render_markdown_checkbox.isChecked(),
             'line_numbers': self.line_numbers_checkbox.isChecked(),
             'monospace': self.monospace_checkbox.isChecked(),
-            'recent_groups': self.tab_group_manager.recent_groups
+            'recent_groups': self.tab_group_manager.recent_groups,
+            'auto_session': self.settings_manager.build_auto_session(
+                tabs_data, current_index, self.tab_group_manager.tab_group_name
+            )
         }
 
-        # Auto-save current session
-        auto_session = {
-            'tabs': [],
-            'current_index': 0,
-            'tab_group_name': self.tab_group_manager.tab_group_name
-        }
-
-        current_tab = self.get_current_tab()
-        tab_count = 0
-
-        for i in range(self.content_stack.count()):
-            widget = self.content_stack.widget(i)
-            if isinstance(widget, TextEditorTab) and widget.file_path:
-                tab_data = {
-                    'path': widget.file_path,
-                    'pinned': widget.is_pinned
-                }
-
-                # Save custom icon, emoji and display name if set
-                for tab_item in self.tab_list.tab_items:
-                    if tab_item.editor_tab == widget:
-                        if tab_item.custom_icon:
-                            tab_data['icon'] = tab_item.custom_icon
-                        if tab_item.custom_emoji:
-                            tab_data['emoji'] = tab_item.custom_emoji
-                        if tab_item.custom_display_name:
-                            tab_data['display_name'] = tab_item.custom_display_name
-                        break
-
-                auto_session['tabs'].append(tab_data)
-                if widget == current_tab:
-                    auto_session['current_index'] = tab_count
-                tab_count += 1
-
-        settings['auto_session'] = auto_session
-
-        try:
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=2)
-        except Exception as e:
-            print(f"Failed to save settings: {e}")
+        self.settings_manager.save(settings)
 
     def load_settings(self):
         """Load window settings"""
-        if not os.path.exists(self.settings_file):
+        settings = self.settings_manager.load()
+        if not settings:
             return
 
-        try:
-            with open(self.settings_file, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
+        # Restore geometry with screen validation
+        if 'geometry' in settings:
+            screen = QGuiApplication.primaryScreen()
+            geo = self.settings_manager.validate_geometry(
+                settings['geometry'],
+                screen.availableGeometry()
+            )
+            if geo:
+                self.setGeometry(geo['x'], geo['y'], geo['width'], geo['height'])
 
-            # Restore geometry
-            if 'geometry' in settings:
-                geo = settings['geometry']
-                # Get the available screen geometry
-                from PyQt6.QtGui import QGuiApplication
-                screen = QGuiApplication.primaryScreen()
-                screen_geometry = screen.availableGeometry()
+        # Restore last folders
+        self.last_file_folder = self.settings_manager.get('last_file_folder')
+        self.last_tabs_folder = self.settings_manager.get('last_tabs_folder')
+        self.tab_group_manager.current_tabs_file = self.settings_manager.get('current_tabs_file')
 
-                # Ensure window is not too large for screen
-                width = min(geo['width'], screen_geometry.width())
-                height = min(geo['height'], screen_geometry.height())
+        # Restore view mode
+        self.set_tab_view_mode(self.settings_manager.get('view_mode', 'normal'))
 
-                # Ensure window is within screen bounds with padding for title bar
-                # Add 50px minimum from top to ensure title bar is always visible
-                min_top_margin = 50
-                x = max(screen_geometry.x(), min(geo['x'], screen_geometry.right() - width))
-                y = max(screen_geometry.y() + min_top_margin, min(geo['y'], screen_geometry.bottom() - height))
+        # Restore preferences
+        self.render_markdown_checkbox.setChecked(self.settings_manager.get('render_markdown', True))
+        self.line_numbers_checkbox.setChecked(self.settings_manager.get('line_numbers', True))
+        self.monospace_checkbox.setChecked(self.settings_manager.get('monospace', False))
 
-                self.setGeometry(x, y, width, height)
+        # Restore recent groups history
+        self.tab_group_manager.recent_groups = self.settings_manager.get('recent_groups', [])
+        self.tab_group_manager.filter_nonexistent_groups()
+        self.update_history_combo()
 
-            # Restore last folders
-            self.last_file_folder = settings.get('last_file_folder')
-            self.last_tabs_folder = settings.get('last_tabs_folder')
-            self.tab_group_manager.current_tabs_file = settings.get('current_tabs_file')
-
-            # Restore view mode (this will set the correct splitter size)
-            view_mode = settings.get('view_mode', 'normal')
-            self.set_tab_view_mode(view_mode)
-
-            # Restore markdown rendering preference (default to True)
-            render_markdown = settings.get('render_markdown', True)
-            self.render_markdown_checkbox.setChecked(render_markdown)
-
-            # Restore line numbers preference (default to True)
-            line_numbers = settings.get('line_numbers', True)
-            self.line_numbers_checkbox.setChecked(line_numbers)
-
-            # Restore monospace font preference (default to False)
-            monospace = settings.get('monospace', False)
-            self.monospace_checkbox.setChecked(monospace)
-
-            # Restore recent groups history
-            self.tab_group_manager.recent_groups = settings.get('recent_groups', [])
-            # Filter out any files that no longer exist
-            self.tab_group_manager.filter_nonexistent_groups()
-            self.update_history_combo()
-
-            if self.tab_group_manager.current_tabs_file:
-                self.update_window_title()
-
-        except Exception as e:
-            print(f"Failed to load settings: {e}")
+        if self.tab_group_manager.current_tabs_file:
+            self.update_window_title()
 
     def load_auto_session(self):
         """Load auto-saved session"""
-        if not os.path.exists(self.settings_file):
-            # First launch - start with empty editor
+        tabs_data, current_index, tab_group_name = self.settings_manager.get_auto_session()
+        if not tabs_data:
             return
 
-        try:
-            with open(self.settings_file, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
+        loaded_tabs = []
 
-            if 'auto_session' not in settings or not settings['auto_session']['tabs']:
-                # No saved session - start with empty editor
-                return
+        # Restore tab group name if present
+        self.tab_group_manager.tab_group_name = tab_group_name
+        if tab_group_name:
+            self.update_window_title()
 
-            auto_session = settings['auto_session']
-            loaded_tabs = []
+        # Load each tab
+        for tab_data in tabs_data:
+            file_path = tab_data.get('path')
+            if not file_path or not os.path.exists(file_path):
+                continue
 
-            # Restore tab group name if present
-            self.tab_group_manager.tab_group_name = auto_session.get('tab_group_name')
-            if self.tab_group_manager.tab_group_name:
-                self.update_window_title()
+            tab = TextEditorTab(file_path)
+            tab.is_pinned = tab_data.get('pinned', False)
 
-            # Load each tab
-            for tab_data in auto_session['tabs']:
-                file_path = tab_data['path']
-                is_pinned = tab_data.get('pinned', False)
-                custom_icon = tab_data.get('icon')  # May be None
-                custom_emoji = tab_data.get('emoji')  # May be None
-                custom_display_name = tab_data.get('display_name')  # May be None
+            # Add to content stack and tab list
+            self.content_stack.addWidget(tab)
+            tab_item = self.tab_list.add_tab(tab)
+            self.apply_markdown_to_tab(tab)
+            self.apply_line_numbers_to_tab(tab)
+            self.apply_monospace_to_tab(tab)
+            self._watch_file(file_path)
 
-                if os.path.exists(file_path):
-                    tab = TextEditorTab(file_path)
-                    tab.is_pinned = is_pinned
+            # Set custom icon, emoji and display name if they were saved
+            custom_icon = tab_data.get('icon')
+            custom_emoji = tab_data.get('emoji')
+            custom_display_name = tab_data.get('display_name')
 
-                    # Add to content stack and tab list
-                    self.content_stack.addWidget(tab)
-                    tab_item = self.tab_list.add_tab(tab)
-                    self.apply_markdown_to_tab(tab)
-                    self.apply_line_numbers_to_tab(tab)
-                    self.apply_monospace_to_tab(tab)
-                    self._watch_file(file_path)
+            if custom_icon:
+                tab_item.custom_icon = custom_icon
+            if custom_emoji:
+                tab_item.custom_emoji = custom_emoji
+            if custom_display_name:
+                tab_item.custom_display_name = custom_display_name
+            if custom_icon or custom_emoji or custom_display_name:
+                tab_item.update_display()
 
-                    # Set custom icon, emoji and display name if they were saved
-                    if custom_icon:
-                        tab_item.custom_icon = custom_icon
-                    if custom_emoji:
-                        tab_item.custom_emoji = custom_emoji
-                    if custom_display_name:
-                        tab_item.custom_display_name = custom_display_name
-                    if custom_icon or custom_emoji or custom_display_name:
-                        tab_item.update_display()
+            loaded_tabs.append(tab)
 
-                    loaded_tabs.append(tab)
+        # Set current tab
+        if current_index < len(loaded_tabs):
+            current_tab = loaded_tabs[current_index]
+            self.switch_to_tab(current_tab)
+            # Select in tab list
+            for tab_item in self.tab_list.tab_items:
+                if tab_item.editor_tab == current_tab:
+                    self.tab_list.select_tab(tab_item)
+                    break
 
-            # Set current tab
-            current_index = auto_session.get('current_index', 0)
-            if current_index < len(loaded_tabs):
-                current_tab = loaded_tabs[current_index]
-                self.switch_to_tab(current_tab)
-                # Select in tab list
-                for tab_item in self.tab_list.tab_items:
-                    if tab_item.editor_tab == current_tab:
-                        self.tab_list.select_tab(tab_item)
-                        break
-
-            # Set baseline state if there's a tabs file to track changes against
-            if self.tab_group_manager.current_tabs_file:
-                self._set_baseline_tab_state()
-
-        except Exception as e:
-            print(f"Failed to load auto-session: {e}")
-            # On error, start with empty editor
+        # Set baseline state if there's a tabs file to track changes against
+        if self.tab_group_manager.current_tabs_file:
+            self._set_baseline_tab_state()
 
     def closeEvent(self, event):
         """Handle window close event"""
