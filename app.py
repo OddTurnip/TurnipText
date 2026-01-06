@@ -14,7 +14,7 @@ from xml.dom import minidom
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMessageBox, QWidget,
     QVBoxLayout, QHBoxLayout, QPushButton, QSplitter, QStackedWidget,
-    QLabel, QFrame, QDialog, QLineEdit, QCheckBox, QComboBox
+    QLabel, QFrame, QLineEdit, QCheckBox, QComboBox, QDialog
 )
 from PyQt6.QtCore import Qt, QSize, QDateTime, QFileSystemWatcher
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence, QIcon, QGuiApplication
@@ -24,6 +24,11 @@ from models.tab_list_item_model import TextEditorTab
 from widgets.tab_list import TabListWidget
 from windows.find_replace import FindReplaceDialog
 from windows.icon_editor import IconEditorDialog
+from windows.dialogs import (
+    EditTabDialog, EditGroupDialog, AboutDialog,
+    UnsavedChangesDialog, UnsavedGroupDialog, GroupChangeWarningDialog
+)
+from styles import BUTTON_STYLE, MODIFIED_BUTTON_STYLE
 
 
 def get_app_dir():
@@ -159,28 +164,8 @@ class TextEditorWindow(QMainWindow):
         toolbar_main_layout.setContentsMargins(8, 8, 8, 8)
         toolbar_main_layout.setSpacing(5)
 
-        # Define button style
-        button_style = """
-            QPushButton {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #F8F8F8, stop:1 #E0E0E0);
-                border: 1px solid #B0B0B0;
-                border-radius: 6px;
-                padding: 6px 12px;
-                min-height: 24px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #FFFFFF, stop:1 #E8E8E8);
-                border: 1px solid #909090;
-            }
-            QPushButton:pressed {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #D0D0D0, stop:1 #C0C0C0);
-                border: 1px solid #808080;
-            }
-        """
+        # Use centralized button style
+        button_style = BUTTON_STYLE
 
         # Store the default button style for later use
         self.default_button_style = button_style
@@ -732,32 +717,9 @@ class TextEditorWindow(QMainWindow):
         has_unsaved = current_tab and current_tab.is_modified
 
         if has_unsaved:
-            # Highlight button with yellow/warning color
-            modified_style = """
-                QPushButton {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFDE7, stop:1 #FFF9C4);
-                    border: 1px solid #F9A825;
-                    border-radius: 6px;
-                    padding: 6px 12px;
-                    min-height: 24px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFEF0, stop:1 #FFEB3B);
-                    border: 1px solid #F57F17;
-                }
-                QPushButton:pressed {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFF59D, stop:1 #FBC02D);
-                    border: 1px solid #E65100;
-                }
-            """
-            self.save_btn.setStyleSheet(modified_style)
+            self.save_btn.setStyleSheet(MODIFIED_BUTTON_STYLE)
             self.save_btn.setText("⚠️ Save")
         else:
-            # Reset to default style
             self.save_btn.setStyleSheet(self.default_button_style)
             self.save_btn.setText("💾 Save")
 
@@ -777,32 +739,9 @@ class TextEditorWindow(QMainWindow):
         has_unsaved = has_unsaved_files or has_unsaved_group
 
         if has_unsaved:
-            # Highlight button with yellow/warning color
-            modified_style = """
-                QPushButton {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFDE7, stop:1 #FFF9C4);
-                    border: 1px solid #F9A825;
-                    border-radius: 6px;
-                    padding: 6px 12px;
-                    min-height: 24px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFEF0, stop:1 #FFEB3B);
-                    border: 1px solid #F57F17;
-                }
-                QPushButton:pressed {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFF59D, stop:1 #FBC02D);
-                    border: 1px solid #E65100;
-                }
-            """
-            self.save_all_btn.setStyleSheet(modified_style)
+            self.save_all_btn.setStyleSheet(MODIFIED_BUTTON_STYLE)
             self.save_all_btn.setText("⚠️ Save All Changes")
         else:
-            # Reset to default style
             self.save_all_btn.setStyleSheet(self.default_button_style)
             self.save_all_btn.setText("💾 Save All Changes")
 
@@ -1038,8 +977,6 @@ class TextEditorWindow(QMainWindow):
 
     def edit_selected_emoji(self):
         """Edit the emoji and display name for the selected tab"""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QCheckBox
-
         # Find the selected tab
         selected_tab_item = None
         for tab_item in self.tab_list.tab_items:
@@ -1051,193 +988,25 @@ class TextEditorWindow(QMainWindow):
             QMessageBox.information(self, "No Tab Selected", "Please select a tab first.")
             return
 
-        # Create custom dialog
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Edit Tab Appearance")
-        layout = QVBoxLayout()
-
-        # Style for input fields
-        input_style = """
-            QLineEdit {
-                background-color: white;
-                border: 1px solid #B0B0B0;
-                border-radius: 3px;
-                padding: 4px 8px;
-                min-height: 20px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #2196F3;
-            }
-        """
-
-        # Style for dialog buttons
-        button_style = """
-            QPushButton {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #F8F8F8, stop:1 #E0E0E0);
-                border: 1px solid #B0B0B0;
-                border-radius: 4px;
-                padding: 6px 16px;
-                min-width: 60px;
-                min-height: 22px;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #FFFFFF, stop:1 #E8E8E8);
-                border: 1px solid #909090;
-            }
-            QPushButton:pressed {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #D0D0D0, stop:1 #C0C0C0);
-                border: 1px solid #808080;
-            }
-        """
-
-        # Emoji input
-        emoji_layout = QHBoxLayout()
-        emoji_label = QLabel("Emoji:")
-        emoji_label.setFixedWidth(100)
-        emoji_layout.addWidget(emoji_label)
-        emoji_input = QLineEdit()
-        emoji_input.setText(selected_tab_item.get_emoji())
-        emoji_input.setPlaceholderText("e.g., 📄 or P")
-        emoji_input.setStyleSheet(input_style)
-        emoji_layout.addWidget(emoji_input)
-
-        # Hint label (shown when icon overrides emoji)
-        emoji_hint = QLabel("(icon overrides)")
-        emoji_hint.setStyleSheet("color: #666666; font-style: italic;")
-        emoji_hint.setVisible(selected_tab_item.custom_icon is not None)
-        emoji_layout.addWidget(emoji_hint)
-
-        layout.addLayout(emoji_layout)
-
-        # Custom icon section
-        icon_layout = QHBoxLayout()
-        icon_label = QLabel("Icon:")
-        icon_label.setFixedWidth(100)
-        icon_layout.addWidget(icon_label)
-
-        # Track pending icon change
-        pending_icon = [selected_tab_item.custom_icon]  # Use list to allow mutation in closure
-
-        # Icon status label
-        icon_status = QLabel()
-        if selected_tab_item.custom_icon:
-            icon_status.setText("Custom icon set")
-            icon_status.setStyleSheet("color: #4CAF50;")
-        else:
-            icon_status.setText("No custom icon")
-            icon_status.setStyleSheet("color: #666666;")
-        icon_layout.addWidget(icon_status)
-
-        icon_layout.addStretch()
-
-        # Remove icon button (only shown when icon is set)
-        remove_icon_btn = QPushButton("Remove")
-        remove_icon_btn.setStyleSheet(button_style)
-        remove_icon_btn.setVisible(selected_tab_item.custom_icon is not None)
-
-        def remove_icon():
-            pending_icon[0] = None
-            icon_status.setText("Icon will be removed")
-            icon_status.setStyleSheet("color: #FF9800;")
-            emoji_hint.setVisible(False)
-            remove_icon_btn.setVisible(False)
-
-        remove_icon_btn.clicked.connect(remove_icon)
-        icon_layout.addWidget(remove_icon_btn)
-
-        # Upload icon button
-        upload_icon_btn = QPushButton("Upload...")
-        upload_icon_btn.setStyleSheet(button_style)
-
-        def open_icon_editor():
-            icon_dialog = IconEditorDialog(dialog, pending_icon[0])
-            if icon_dialog.exec() == QDialog.DialogCode.Accepted:
-                result = icon_dialog.get_icon_filename()
-                if result == "":
-                    # Icon removed (from icon editor dialog)
-                    remove_icon()
-                elif result:
-                    # New icon set
-                    pending_icon[0] = result
-                    icon_status.setText("New icon selected")
-                    icon_status.setStyleSheet("color: #4CAF50;")
-                    emoji_hint.setVisible(True)
-                    remove_icon_btn.setVisible(True)
-
-        upload_icon_btn.clicked.connect(open_icon_editor)
-        icon_layout.addWidget(upload_icon_btn)
-        layout.addLayout(icon_layout)
-
-        # Display name input
-        name_layout = QHBoxLayout()
-        name_label = QLabel("Display Name:")
-        name_label.setFixedWidth(100)
-        name_layout.addWidget(name_label)
-        name_input = QLineEdit()
-        name_input.setText(selected_tab_item.custom_display_name or "")
-        # Show what the default display name will be (without custom override)
-        default_name = "Untitled"
-        if selected_tab_item.editor_tab.file_path:
-            filename = os.path.basename(selected_tab_item.editor_tab.file_path)
-            name_without_ext = os.path.splitext(filename)[0]
-            default_name = name_without_ext.lstrip('_') or filename
-        name_input.setPlaceholderText(f"Default: {default_name}")
-        name_input.setStyleSheet(input_style)
-        name_layout.addWidget(name_input)
-        layout.addLayout(name_layout)
-
-        # Pin checkbox
-        pin_layout = QHBoxLayout()
-        pin_label = QLabel("")
-        pin_label.setFixedWidth(100)
-        pin_layout.addWidget(pin_label)
-        pin_checkbox = QCheckBox("📌 Pin this tab")
-        pin_checkbox.setChecked(selected_tab_item.editor_tab.is_pinned)
-        pin_layout.addWidget(pin_checkbox)
-        pin_layout.addStretch()
-        layout.addLayout(pin_layout)
-
-        # Buttons
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        ok_btn = QPushButton("OK")
-        ok_btn.setStyleSheet(button_style)
-        ok_btn.clicked.connect(dialog.accept)
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setStyleSheet(button_style)
-        cancel_btn.clicked.connect(dialog.reject)
-        button_layout.addWidget(ok_btn)
-        button_layout.addWidget(cancel_btn)
-        layout.addLayout(button_layout)
-
-        dialog.setLayout(layout)
-        dialog.setMinimumWidth(400)
-
+        dialog = EditTabDialog(selected_tab_item, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            # Update custom icon if changed
-            if pending_icon[0] != selected_tab_item.custom_icon:
-                selected_tab_item.custom_icon = pending_icon[0]
+            icon, emoji, display_name, pinned = dialog.get_results()
 
-            # Always save emoji (preserved even when icon is set)
-            new_emoji = emoji_input.text().strip()
-            if new_emoji and new_emoji != selected_tab_item.get_emoji():
-                selected_tab_item.custom_emoji = new_emoji
-            elif not new_emoji:
+            # Update custom icon if changed
+            if icon != selected_tab_item.custom_icon:
+                selected_tab_item.custom_icon = icon
+
+            # Update emoji
+            if emoji and emoji != selected_tab_item.get_emoji():
+                selected_tab_item.custom_emoji = emoji
+            elif not emoji:
                 selected_tab_item.custom_emoji = None
 
-            # Update display name if changed
-            new_name = name_input.text().strip()
-            if new_name:
-                selected_tab_item.custom_display_name = new_name
-            else:
-                selected_tab_item.custom_display_name = None
+            # Update display name
+            selected_tab_item.custom_display_name = display_name
 
             # Update pin status if changed
-            new_pin_status = pin_checkbox.isChecked()
-            if new_pin_status != selected_tab_item.editor_tab.is_pinned:
+            if pinned != selected_tab_item.editor_tab.is_pinned:
                 self.toggle_pin(selected_tab_item.editor_tab)
 
             selected_tab_item.update_display()
@@ -1290,29 +1059,7 @@ class TextEditorWindow(QMainWindow):
 
         if has_changes:
             self.save_group_btn.setText("⚠️ Save Group")
-            # Override button style with yellow background
-            modified_style = """
-                QPushButton {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFDE7, stop:1 #FFF9C4);
-                    border: 1px solid #F9A825;
-                    border-radius: 6px;
-                    padding: 6px 12px;
-                    min-height: 24px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFEF0, stop:1 #FFEB3B);
-                    border: 1px solid #F57F17;
-                }
-                QPushButton:pressed {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFF59D, stop:1 #FBC02D);
-                    border: 1px solid #E65100;
-                }
-            """
-            self.save_group_btn.setStyleSheet(modified_style)
+            self.save_group_btn.setStyleSheet(MODIFIED_BUTTON_STYLE)
         else:
             self.save_group_btn.setText("💾 Save Group")
             self.save_group_btn.setStyleSheet(self.default_button_style)
@@ -1343,187 +1090,15 @@ class TextEditorWindow(QMainWindow):
 
     def edit_tabs_dialog(self):
         """Show dialog to edit tab group name"""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel
-
-        # Create custom dialog
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Edit Tab Group")
-        layout = QVBoxLayout()
-
-        # Style for input fields
-        input_style = """
-            QLineEdit {
-                background-color: white;
-                border: 1px solid #B0B0B0;
-                border-radius: 3px;
-                padding: 4px 8px;
-                min-height: 20px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #2196F3;
-            }
-        """
-
-        # Style for dialog buttons
-        button_style = """
-            QPushButton {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #F8F8F8, stop:1 #E0E0E0);
-                border: 1px solid #B0B0B0;
-                border-radius: 4px;
-                padding: 6px 16px;
-                min-width: 60px;
-                min-height: 22px;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #FFFFFF, stop:1 #E8E8E8);
-                border: 1px solid #909090;
-            }
-            QPushButton:pressed {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #D0D0D0, stop:1 #C0C0C0);
-                border: 1px solid #808080;
-            }
-        """
-
-        # Tab group name input
-        name_layout = QHBoxLayout()
-        name_label = QLabel("Tab Group Name:")
-        name_label.setFixedWidth(120)
-        name_layout.addWidget(name_label)
-        name_input = QLineEdit()
-        name_input.setText(self.tab_group_name or "")
-        # Show default name based on tabs file
-        default_name = "TurnipText"
-        if self.current_tabs_file:
-            filename = os.path.basename(self.current_tabs_file)
-            if filename.endswith('.tabs'):
-                default_name = filename[:-5]
-        name_input.setPlaceholderText(f"Default: {default_name}")
-        name_input.setStyleSheet(input_style)
-        name_layout.addWidget(name_input)
-        layout.addLayout(name_layout)
-
-        # Info label
-        info_label = QLabel("This name will be used as the window title and saved in the .tabs file.")
-        info_label.setStyleSheet("color: #666666; font-style: italic; margin-top: 5px;")
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
-
-        # Buttons
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        ok_btn = QPushButton("OK")
-        ok_btn.setStyleSheet(button_style)
-        ok_btn.clicked.connect(dialog.accept)
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setStyleSheet(button_style)
-        cancel_btn.clicked.connect(dialog.reject)
-        button_layout.addWidget(ok_btn)
-        button_layout.addWidget(cancel_btn)
-        layout.addLayout(button_layout)
-
-        dialog.setLayout(layout)
-        dialog.setMinimumWidth(400)
-
+        dialog = EditGroupDialog(self.tab_group_name, self.current_tabs_file, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            new_name = name_input.text().strip()
-            if new_name:
-                self.tab_group_name = new_name
-            else:
-                self.tab_group_name = None
-
+            self.tab_group_name = dialog.get_result()
             self.update_window_title()
             self.mark_tabs_metadata_modified()
 
     def show_about_dialog(self):
         """Show the About dialog with keyboard shortcuts and info"""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QLabel
-
-        # Create custom dialog
-        dialog = QDialog(self)
-        dialog.setWindowTitle("About TurnipText")
-        layout = QVBoxLayout()
-
-        # Title
-        title_label = QLabel("<h2>TurnipText Editor</h2>")
-        layout.addWidget(title_label)
-
-        # Keyboard shortcuts section
-        shortcuts_label = QLabel("<h3>Keyboard Shortcuts</h3>")
-        layout.addWidget(shortcuts_label)
-
-        shortcuts_text = QLabel("""
-<table cellpadding="5">
-  <tr><td><b>Ctrl+N</b></td><td>New file</td></tr>
-  <tr><td><b>Ctrl+O</b></td><td>Open file</td></tr>
-  <tr><td><b>Ctrl+S</b></td><td>Save current tab</td></tr>
-  <tr><td><b>Ctrl+Shift+S</b></td><td>Save all files</td></tr>
-  <tr><td><b>Ctrl+F</b></td><td>Find &amp; Replace</td></tr>
-  <tr><td><b>Ctrl+H</b></td><td>Find &amp; Replace</td></tr>
-  <tr><td><b>Ctrl+I</b></td><td>Document statistics</td></tr>
-  <tr><td><b>Ctrl+Z</b></td><td>Undo</td></tr>
-  <tr><td><b>Ctrl+Y</b></td><td>Redo</td></tr>
-</table>
-        """)
-        layout.addWidget(shortcuts_text)
-
-        # Fonts section
-        fonts_label = QLabel("<h3>Fonts</h3>")
-        layout.addWidget(fonts_label)
-
-        fonts_text = QLabel("""
-<b>Line numbers:</b> Calibri<br>
-<b>Editor:</b> System default (or Consolas with Monospace checkbox)
-        """)
-        layout.addWidget(fonts_text)
-
-        # About section
-        about_label = QLabel("<h3>About</h3>")
-        layout.addWidget(about_label)
-
-        about_text = QLabel("""
-A free text editor created by <a href="https://oddturnip.com">OddTurnip.com</a>,
-using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
-        """)
-        about_text.setOpenExternalLinks(True)  # Enable clickable links
-        about_text.setWordWrap(True)
-        layout.addWidget(about_text)
-
-        # Close button
-        button_style = """
-            QPushButton {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #F8F8F8, stop:1 #E0E0E0);
-                border: 1px solid #B0B0B0;
-                border-radius: 4px;
-                padding: 6px 16px;
-                min-width: 80px;
-                min-height: 22px;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #FFFFFF, stop:1 #E8E8E8);
-                border: 1px solid #909090;
-            }
-            QPushButton:pressed {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #D0D0D0, stop:1 #C0C0C0);
-                border: 1px solid #808080;
-            }
-        """
-        close_btn = QPushButton("Close")
-        close_btn.setStyleSheet(button_style)
-        close_btn.clicked.connect(dialog.accept)
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(close_btn)
-        layout.addLayout(button_layout)
-
-        dialog.setLayout(layout)
-        dialog.setMinimumWidth(450)
+        dialog = AboutDialog(self)
         dialog.exec()
 
     def new_group_dialog(self):
@@ -1711,53 +1286,15 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
         if not unsaved_files and not has_group_changes:
             return True  # No unsaved changes, safe to proceed
 
-        # Build warning message
-        message_parts = []
-        if unsaved_files:
-            message_parts.append("Unsaved file changes:\n" + "\n".join(f"  • {name}" for name in unsaved_files))
-        if has_group_changes:
-            group_name = self.tab_group_name or os.path.basename(self.current_tabs_file or "current group")
-            message_parts.append(f"Unsaved group changes: {group_name}")
-
-        message = "\n\n".join(message_parts)
-        message += "\n\nDo you want to save before switching groups?"
-
-        # Create custom dialog with Save All, Don't Save, Cancel buttons
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Unsaved Changes")
-        layout = QVBoxLayout()
-
-        label = QLabel(message)
-        label.setWordWrap(True)
-        layout.addWidget(label)
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(lambda: dialog.done(0))
-        button_layout.addWidget(cancel_btn)
-
-        dont_save_btn = QPushButton("Don't Save")
-        dont_save_btn.clicked.connect(lambda: dialog.done(1))
-        button_layout.addWidget(dont_save_btn)
-
-        save_btn = QPushButton("Save All Changes")
-        save_btn.clicked.connect(lambda: dialog.done(2))
-        save_btn.setDefault(True)
-        button_layout.addWidget(save_btn)
-
-        layout.addLayout(button_layout)
-        dialog.setLayout(layout)
-        dialog.setMinimumWidth(400)
-
+        group_name = self.tab_group_name or os.path.basename(self.current_tabs_file or "current group")
+        dialog = GroupChangeWarningDialog(unsaved_files, has_group_changes, group_name, self)
         result = dialog.exec()
 
-        if result == 0:  # Cancel
+        if result == GroupChangeWarningDialog.CANCEL:
             return False
-        elif result == 2:  # Save All Changes
+        elif result == GroupChangeWarningDialog.SAVE_ALL:
             self.save_all()
-        # result == 1: Don't Save - just proceed
+        # DONT_SAVE - just proceed
 
         return True
 
@@ -2145,93 +1682,23 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                 modified_tabs.append(file_name)
 
         if modified_tabs:
-            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
-
-            # Create custom dialog
-            dialog = QDialog(self)
-            dialog.setWindowTitle("Unsaved Changes")
-            layout = QVBoxLayout()
-
-            # Message
-            message = QLabel(
-                "The following files have unsaved changes:\n\n" +
-                "\n".join(f"  • {name}" for name in modified_tabs) +
-                "\n\nWhat would you like to do?"
-            )
-            layout.addWidget(message)
-
-            # Button style
-            button_style = """
-                QPushButton {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #F8F8F8, stop:1 #E0E0E0);
-                    border: 1px solid #B0B0B0;
-                    border-radius: 4px;
-                    padding: 8px 16px;
-                    min-width: 100px;
-                    min-height: 28px;
-                }
-                QPushButton:hover {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFFFF, stop:1 #E8E8E8);
-                    border: 1px solid #909090;
-                }
-                QPushButton:pressed {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #D0D0D0, stop:1 #C0C0C0);
-                    border: 1px solid #808080;
-                }
-            """
-
-            # Buttons
-            button_layout = QHBoxLayout()
-            button_layout.addStretch()
-
-            exit_btn = QPushButton("❌ Exit")
-            exit_btn.setToolTip("Exit without saving changes")
-            exit_btn.setStyleSheet(button_style)
-            exit_btn.clicked.connect(lambda: dialog.done(1))  # Exit without saving
-            button_layout.addWidget(exit_btn)
-
-            cancel_btn = QPushButton("🔙 Cancel")
-            cancel_btn.setToolTip("Cancel and return to editing")
-            cancel_btn.setStyleSheet(button_style)
-            cancel_btn.clicked.connect(lambda: dialog.done(0))  # Cancel
-            button_layout.addWidget(cancel_btn)
-
-            save_exit_btn = QPushButton("💾 Save and Exit")
-            save_exit_btn.setToolTip("Save all changes and exit")
-            save_exit_btn.setStyleSheet(button_style)
-            save_exit_btn.clicked.connect(lambda: dialog.done(2))  # Save and exit
-            button_layout.addWidget(save_exit_btn)
-
-            layout.addLayout(button_layout)
-            dialog.setLayout(layout)
-            dialog.setMinimumWidth(400)
-
+            dialog = UnsavedChangesDialog(modified_tabs, self)
             result = dialog.exec()
 
-            if result == 0:  # Cancel
+            if result == UnsavedChangesDialog.CANCEL:
                 event.ignore()
                 return
-            elif result == 2:  # Save and exit
+            elif result == UnsavedChangesDialog.SAVE_AND_EXIT:
                 # Save all files that can be saved
                 for i in range(self.content_stack.count()):
                     widget = self.content_stack.widget(i)
                     if isinstance(widget, TextEditorTab) and widget.is_modified and widget.file_path:
                         widget.save_file()
-            # result == 1: Exit without saving, just continue
+            # EXIT_WITHOUT_SAVING - just continue
 
         # Check for unsaved tab group changes
         has_tab_changes = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
         if has_tab_changes:
-            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
-
-            # Create custom dialog
-            dialog = QDialog(self)
-            dialog.setWindowTitle("Unsaved Tab Group")
-            layout = QVBoxLayout()
-
             # Determine tab group name for display
             group_name = self.tab_group_name
             if not group_name and self.current_tabs_file:
@@ -2240,73 +1707,13 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             if not group_name:
                 group_name = "Current Tab Group"
 
-            # Message
-            message = QLabel(
-                f"The tab group '{group_name}' has unsaved changes.\n\n"
-                "This includes changes to:\n"
-                "  • Tabs added or removed\n"
-                "  • Tab emojis or display names\n"
-                "  • Tab group name\n\n"
-                "Would you like to save the tab group before exiting?"
-            )
-            message.setWordWrap(True)
-            layout.addWidget(message)
-
-            # Button style
-            button_style = """
-                QPushButton {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #F8F8F8, stop:1 #E0E0E0);
-                    border: 1px solid #B0B0B0;
-                    border-radius: 4px;
-                    padding: 8px 16px;
-                    min-width: 100px;
-                    min-height: 28px;
-                }
-                QPushButton:hover {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFFFF, stop:1 #E8E8E8);
-                    border: 1px solid #909090;
-                }
-                QPushButton:pressed {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #D0D0D0, stop:1 #C0C0C0);
-                    border: 1px solid #808080;
-                }
-            """
-
-            # Buttons
-            button_layout = QHBoxLayout()
-            button_layout.addStretch()
-
-            exit_btn = QPushButton("❌ Exit")
-            exit_btn.setToolTip("Exit without saving tab group")
-            exit_btn.setStyleSheet(button_style)
-            exit_btn.clicked.connect(lambda: dialog.done(1))  # Exit without saving
-            button_layout.addWidget(exit_btn)
-
-            cancel_btn = QPushButton("🔙 Cancel")
-            cancel_btn.setToolTip("Cancel and return to editing")
-            cancel_btn.setStyleSheet(button_style)
-            cancel_btn.clicked.connect(lambda: dialog.done(0))  # Cancel
-            button_layout.addWidget(cancel_btn)
-
-            save_exit_btn = QPushButton("💾 Save Group")
-            save_exit_btn.setToolTip("Save tab group and exit")
-            save_exit_btn.setStyleSheet(button_style)
-            save_exit_btn.clicked.connect(lambda: dialog.done(2))  # Save and exit
-            button_layout.addWidget(save_exit_btn)
-
-            layout.addLayout(button_layout)
-            dialog.setLayout(layout)
-            dialog.setMinimumWidth(400)
-
+            dialog = UnsavedGroupDialog(group_name, self)
             result = dialog.exec()
 
-            if result == 0:  # Cancel
+            if result == UnsavedGroupDialog.CANCEL:
                 event.ignore()
                 return
-            elif result == 2:  # Save group
+            elif result == UnsavedGroupDialog.SAVE_GROUP:
                 if self.current_tabs_file:
                     self.save_tabs(self.current_tabs_file)
                 else:
@@ -2315,7 +1722,7 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     if self._has_tab_state_changed():
                         event.ignore()
                         return
-            # result == 1: Exit without saving, just continue
+            # EXIT_WITHOUT_SAVING - just continue
 
         # Save settings and session before closing
         self.save_settings()
