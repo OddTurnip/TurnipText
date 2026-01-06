@@ -212,15 +212,15 @@ class TextEditorWindow(QMainWindow):
         toolbar_row1.addWidget(load_btn)
 
         # Save button (current tab)
-        save_btn = QPushButton("💾 Save")
-        save_btn.setToolTip("Save current tab (Ctrl+S)")
-        save_btn.clicked.connect(self.save_current_tab)
-        save_btn.setStyleSheet(button_style)
-        toolbar_row1.addWidget(save_btn)
+        self.save_btn = QPushButton("💾 Save")
+        self.save_btn.setToolTip("Save current tab (Ctrl+S)")
+        self.save_btn.clicked.connect(self.save_current_tab)
+        self.save_btn.setStyleSheet(button_style)
+        toolbar_row1.addWidget(self.save_btn)
 
-        # Save All button
-        self.save_all_btn = QPushButton("💾 Save All")
-        self.save_all_btn.setToolTip("Save all modified files (Ctrl+Shift+S)")
+        # Save All Changes button (saves files AND group)
+        self.save_all_btn = QPushButton("💾 Save All Changes")
+        self.save_all_btn.setToolTip("Save all modified files and group (Ctrl+Shift+S)")
         self.save_all_btn.clicked.connect(self.save_all)
         self.save_all_btn.setStyleSheet(button_style)
         toolbar_row1.addWidget(self.save_all_btn)
@@ -278,13 +278,6 @@ class TextEditorWindow(QMainWindow):
         self.save_group_btn.clicked.connect(self.save_group)
         self.save_group_btn.setStyleSheet(button_style)
         toolbar_row2.addWidget(self.save_group_btn)
-
-        # Save Group As button
-        save_group_as_btn = QPushButton("💾 Save Group As")
-        save_group_as_btn.setToolTip("Save tab group to a new location")
-        save_group_as_btn.clicked.connect(self.save_group_as_dialog)
-        save_group_as_btn.setStyleSheet(button_style)
-        toolbar_row2.addWidget(save_group_as_btn)
 
         # Edit Group button
         edit_group_btn = QPushButton("✏️ Edit Group")
@@ -470,16 +463,48 @@ class TextEditorWindow(QMainWindow):
         return self.get_default_file_folder()
 
     def new_file(self):
-        """Create a new empty file tab"""
-        tab = TextEditorTab()
-        self.content_stack.addWidget(tab)
-        self.tab_list.add_tab(tab)
-        self.apply_markdown_to_tab(tab)
-        self.apply_line_numbers_to_tab(tab)
-        self.apply_monospace_to_tab(tab)
-        self.switch_to_tab(tab)
-        # Mark tab group as modified since a new tab was added
-        self.mark_tabs_metadata_modified()
+        """Create a new file tab - prompts for save location"""
+        default_folder = self.get_default_file_folder()
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Create New File",
+            os.path.join(default_folder, "untitled.md"),
+            "Markdown Files (*.md);;Text Files (*.txt);;All Files (*)"
+        )
+
+        if file_path:
+            # Convert to absolute path
+            file_path = os.path.abspath(file_path)
+
+            # Update last folder
+            self.last_file_folder = os.path.dirname(file_path)
+
+            # Check if file already exists and is open
+            for i in range(self.content_stack.count()):
+                widget = self.content_stack.widget(i)
+                if isinstance(widget, TextEditorTab) and widget.file_path == file_path:
+                    self.switch_to_tab(widget)
+                    QMessageBox.information(
+                        self,
+                        "File Already Open",
+                        f"'{os.path.basename(file_path)}' is already open.\nSwitched to that tab."
+                    )
+                    return
+
+            # Create new tab with the file path
+            tab = TextEditorTab()
+            tab.file_path = file_path
+            tab.save_file()  # Create the empty file
+            self.content_stack.addWidget(tab)
+            self.tab_list.add_tab(tab)
+            self.apply_markdown_to_tab(tab)
+            self.apply_line_numbers_to_tab(tab)
+            self.apply_monospace_to_tab(tab)
+            self._watch_file(file_path)
+            self.switch_to_tab(tab)
+            # Mark tab group as modified since a new tab was added
+            self.mark_tabs_metadata_modified()
 
     def load_file(self):
         """Load a file into a new tab"""
@@ -674,7 +699,7 @@ class TextEditorWindow(QMainWindow):
                 self.update_save_all_button()
 
     def save_all(self):
-        """Save all modified files"""
+        """Save all modified files and the group"""
         saved_count = 0
 
         for i in range(self.content_stack.count()):
@@ -686,24 +711,70 @@ class TextEditorWindow(QMainWindow):
                     self.tab_list.update_tab_display(widget)
                     saved_count += 1
 
+        # Also save the group if there's a location
+        if self.current_tabs_file:
+            self.save_tabs(self.current_tabs_file)
+
         # Update last saved timestamp if anything was saved
         if saved_count > 0:
             from datetime import datetime
             current_time = datetime.now().strftime("%H:%M")
-            self.last_saved_all_label.setText(f"Saved files {current_time}")
+            self.last_saved_all_label.setText(f"Saved {current_time}")
             self.last_saved_all_label.setVisible(True)
 
-        # Update button appearance
+        # Update button appearances
         self.update_save_all_button()
+        self.update_save_button()
+
+    def update_save_button(self):
+        """Update the Save button appearance based on whether current tab has unsaved changes"""
+        current_tab = self.get_current_tab()
+        has_unsaved = current_tab and current_tab.is_modified
+
+        if has_unsaved:
+            # Highlight button with yellow/warning color
+            modified_style = """
+                QPushButton {
+                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                      stop:0 #FFFDE7, stop:1 #FFF9C4);
+                    border: 1px solid #F9A825;
+                    border-radius: 6px;
+                    padding: 6px 12px;
+                    min-height: 24px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                      stop:0 #FFFEF0, stop:1 #FFEB3B);
+                    border: 1px solid #F57F17;
+                }
+                QPushButton:pressed {
+                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                      stop:0 #FFF59D, stop:1 #FBC02D);
+                    border: 1px solid #E65100;
+                }
+            """
+            self.save_btn.setStyleSheet(modified_style)
+            self.save_btn.setText("⚠️ Save")
+        else:
+            # Reset to default style
+            self.save_btn.setStyleSheet(self.default_button_style)
+            self.save_btn.setText("💾 Save")
 
     def update_save_all_button(self):
-        """Update the Save All button appearance based on whether there are unsaved changes"""
-        has_unsaved = False
+        """Update the Save All Changes button appearance based on whether there are unsaved changes"""
+        # Check for unsaved file changes
+        has_unsaved_files = False
         for i in range(self.content_stack.count()):
             widget = self.content_stack.widget(i)
             if isinstance(widget, TextEditorTab) and widget.is_modified and widget.file_path:
-                has_unsaved = True
+                has_unsaved_files = True
                 break
+
+        # Check for unsaved group changes
+        has_unsaved_group = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
+
+        has_unsaved = has_unsaved_files or has_unsaved_group
 
         if has_unsaved:
             # Highlight button with yellow/warning color
@@ -729,11 +800,11 @@ class TextEditorWindow(QMainWindow):
                 }
             """
             self.save_all_btn.setStyleSheet(modified_style)
-            self.save_all_btn.setText("⚠️ Save All")
+            self.save_all_btn.setText("⚠️ Save All Changes")
         else:
             # Reset to default style
             self.save_all_btn.setStyleSheet(self.default_button_style)
-            self.save_all_btn.setText("💾 Save All")
+            self.save_all_btn.setText("💾 Save All Changes")
 
     def close_tab(self, widget):
         """Close the given tab widget"""
@@ -895,9 +966,16 @@ class TextEditorWindow(QMainWindow):
         """Switch to a specific tab"""
         if isinstance(tab, TextEditorTab):
             self.content_stack.setCurrentWidget(tab)
+            # Select in tab list
+            for tab_item in self.tab_list.tab_items:
+                if tab_item.editor_tab == tab:
+                    self.tab_list.select_tab(tab_item)
+                    break
             # Notify Find & Replace dialog about the tab switch
             if self.find_replace_dialog and self.find_replace_dialog.isVisible():
                 self.find_replace_dialog.update_current_tab(tab)
+            # Update Save button highlighting
+            self.update_save_button()
 
     def set_tab_view_mode(self, mode):
         """Set the view mode for the tab list"""
@@ -1248,8 +1326,9 @@ class TextEditorWindow(QMainWindow):
     def update_tab_title(self, tab):
         """Update the title of a tab"""
         self.tab_list.update_tab_display(tab)
-        # Update Save All button when any tab changes
+        # Update Save buttons when any tab changes
         self.update_save_all_button()
+        self.update_save_button()
 
     def update_window_title(self):
         """Update the window title based on tab group name or current tabs file"""
@@ -1451,25 +1530,9 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
 
     def new_group_dialog(self):
         """Create a new tab group - closes all tabs and prompts for save location"""
-        # Check for unsaved changes before closing
-        modified_tabs = []
-        for i in range(self.content_stack.count()):
-            widget = self.content_stack.widget(i)
-            if isinstance(widget, TextEditorTab) and widget.is_modified:
-                file_name = os.path.basename(widget.file_path) if widget.file_path else "Untitled"
-                modified_tabs.append(file_name)
-
-        if modified_tabs:
-            reply = QMessageBox.question(
-                self,
-                "Unsaved Changes",
-                "The following files have unsaved changes:\n\n" +
-                "\n".join(f"  • {name}" for name in modified_tabs) +
-                "\n\nDo you want to discard them and create a new group?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.No:
-                return
+        # Check for unsaved changes first
+        if not self._check_unsaved_before_group_change():
+            return
 
         # Prompt for save location for the new group
         default_folder = self.get_default_tabs_folder()
@@ -1632,8 +1695,80 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
         # Add to recent groups history
         self.add_to_recent_groups(tabs_file_path)
 
+    def _check_unsaved_before_group_change(self):
+        """Check for unsaved changes before switching groups. Returns True if safe to proceed."""
+        # Check for unsaved file changes
+        unsaved_files = []
+        for i in range(self.content_stack.count()):
+            widget = self.content_stack.widget(i)
+            if isinstance(widget, TextEditorTab) and widget.is_modified:
+                if widget.file_path:
+                    unsaved_files.append(os.path.basename(widget.file_path))
+                else:
+                    unsaved_files.append("Untitled")
+
+        # Check for unsaved group changes
+        has_group_changes = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
+
+        if not unsaved_files and not has_group_changes:
+            return True  # No unsaved changes, safe to proceed
+
+        # Build warning message
+        message_parts = []
+        if unsaved_files:
+            message_parts.append("Unsaved file changes:\n" + "\n".join(f"  • {name}" for name in unsaved_files))
+        if has_group_changes:
+            group_name = self.tab_group_name or os.path.basename(self.current_tabs_file or "current group")
+            message_parts.append(f"Unsaved group changes: {group_name}")
+
+        message = "\n\n".join(message_parts)
+        message += "\n\nDo you want to save before switching groups?"
+
+        # Create custom dialog with Save All, Don't Save, Cancel buttons
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Unsaved Changes")
+        layout = QVBoxLayout()
+
+        label = QLabel(message)
+        label.setWordWrap(True)
+        layout.addWidget(label)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(lambda: dialog.done(0))
+        button_layout.addWidget(cancel_btn)
+
+        dont_save_btn = QPushButton("Don't Save")
+        dont_save_btn.clicked.connect(lambda: dialog.done(1))
+        button_layout.addWidget(dont_save_btn)
+
+        save_btn = QPushButton("Save All Changes")
+        save_btn.clicked.connect(lambda: dialog.done(2))
+        save_btn.setDefault(True)
+        button_layout.addWidget(save_btn)
+
+        layout.addLayout(button_layout)
+        dialog.setLayout(layout)
+        dialog.setMinimumWidth(400)
+
+        result = dialog.exec()
+
+        if result == 0:  # Cancel
+            return False
+        elif result == 2:  # Save All Changes
+            self.save_all()
+        # result == 1: Don't Save - just proceed
+
+        return True
+
     def load_tabs_dialog(self):
         """Show dialog to load a tab group"""
+        # Check for unsaved changes first
+        if not self._check_unsaved_before_group_change():
+            return
+
         default_folder = self.get_default_tabs_folder()
 
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1779,6 +1914,11 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
         if path and os.path.exists(path):
             # Don't reload if it's the current file
             if path != self.current_tabs_file:
+                # Check for unsaved changes first
+                if not self._check_unsaved_before_group_change():
+                    # User cancelled - reset combo to current group
+                    self.update_history_combo()
+                    return
                 self.load_tabs(path)
         elif path:
             # File doesn't exist anymore - remove from history
