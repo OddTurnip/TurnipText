@@ -14,7 +14,7 @@ from xml.dom import minidom
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMessageBox, QWidget,
     QVBoxLayout, QHBoxLayout, QPushButton, QSplitter, QStackedWidget,
-    QLabel, QFrame, QDialog, QLineEdit, QCheckBox
+    QLabel, QFrame, QDialog, QLineEdit, QCheckBox, QComboBox
 )
 from PyQt6.QtCore import Qt, QSize, QDateTime, QFileSystemWatcher
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence, QIcon, QGuiApplication
@@ -59,6 +59,7 @@ class TextEditorWindow(QMainWindow):
         self._baseline_tab_state = None  # Baseline state for comparison (set when loading/saving .tabs)
         self._initial_splitter_set = False  # Track if initial splitter position has been applied
         self.find_replace_dialog = None  # Will be created when first needed
+        self.recent_groups = []  # List of recently loaded .tabs files (max 10)
 
         # File system watcher for detecting external changes
         self.file_watcher = QFileSystemWatcher(self)
@@ -291,6 +292,49 @@ class TextEditorWindow(QMainWindow):
         edit_group_btn.clicked.connect(self.edit_tabs_dialog)
         edit_group_btn.setStyleSheet(button_style)
         toolbar_row2.addWidget(edit_group_btn)
+
+        # Separator before History
+        toolbar_row2.addSpacing(20)
+
+        # History label
+        history_label = QLabel("History:")
+        history_label.setStyleSheet(label_style)
+        toolbar_row2.addWidget(history_label)
+
+        # History dropdown
+        self.history_combo = QComboBox()
+        self.history_combo.setToolTip("Recently loaded tab groups")
+        self.history_combo.setMinimumWidth(150)
+        self.history_combo.setMaximumWidth(250)
+        self.history_combo.addItem("(no recent groups)")
+        self.history_combo.setEnabled(False)
+        self.history_combo.currentIndexChanged.connect(self._on_history_selected)
+        # Style the combo box
+        combo_style = """
+            QComboBox {
+                background-color: white;
+                border: 1px solid #B0B0B0;
+                border-radius: 4px;
+                padding: 4px 8px;
+                min-height: 20px;
+            }
+            QComboBox:hover {
+                border: 1px solid #909090;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 6px solid #666666;
+                margin-right: 6px;
+            }
+        """
+        self.history_combo.setStyleSheet(combo_style)
+        toolbar_row2.addWidget(self.history_combo)
 
         # Last saved label for groups
         self.last_saved_label = QLabel("")
@@ -1590,6 +1634,9 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
         self._set_baseline_tab_state()
         self.update_save_group_button()
 
+        # Add to recent groups history
+        self.add_to_recent_groups(tabs_file_path)
+
     def load_tabs_dialog(self):
         """Show dialog to load a tab group"""
         default_folder = self.get_default_tabs_folder()
@@ -1681,8 +1728,75 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             # Set baseline state for change tracking
             self._set_baseline_tab_state()
 
+            # Add to recent groups history
+            self.add_to_recent_groups(tabs_file_path)
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load tabs:\n{str(e)}")
+
+    def add_to_recent_groups(self, tabs_file_path):
+        """Add a tabs file to the recent groups history"""
+        # Convert to absolute path
+        tabs_file_path = os.path.abspath(tabs_file_path)
+
+        # Remove if already in list (to move it to the top)
+        if tabs_file_path in self.recent_groups:
+            self.recent_groups.remove(tabs_file_path)
+
+        # Add to the beginning
+        self.recent_groups.insert(0, tabs_file_path)
+
+        # Keep only the 10 most recent
+        self.recent_groups = self.recent_groups[:10]
+
+        # Update the combo box
+        self.update_history_combo()
+
+    def update_history_combo(self):
+        """Update the history combo box with recent groups"""
+        # Block signals to prevent triggering selection handler
+        self.history_combo.blockSignals(True)
+
+        self.history_combo.clear()
+
+        if self.recent_groups:
+            self.history_combo.setEnabled(True)
+            for path in self.recent_groups:
+                # Show just the filename without extension
+                filename = os.path.basename(path)
+                if filename.endswith('.tabs'):
+                    display_name = filename[:-5]
+                else:
+                    display_name = filename
+                self.history_combo.addItem(display_name, path)
+        else:
+            self.history_combo.addItem("(no recent groups)")
+            self.history_combo.setEnabled(False)
+
+        # Reset to first item (or -1 for placeholder)
+        self.history_combo.setCurrentIndex(0 if self.recent_groups else -1)
+
+        self.history_combo.blockSignals(False)
+
+    def _on_history_selected(self, index):
+        """Handle selection from history dropdown"""
+        if index < 0 or not self.recent_groups:
+            return
+
+        path = self.history_combo.itemData(index)
+        if path and os.path.exists(path):
+            # Don't reload if it's the current file
+            if path != self.current_tabs_file:
+                self.load_tabs(path)
+        elif path:
+            # File doesn't exist anymore - remove from history
+            QMessageBox.warning(
+                self,
+                "File Not Found",
+                f"The group file no longer exists:\n{path}\n\nIt will be removed from history."
+            )
+            self.recent_groups.remove(path)
+            self.update_history_combo()
 
     def save_settings(self):
         """Save window settings and current session"""
@@ -1699,7 +1813,8 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             'view_mode': self.tab_list.view_mode,
             'render_markdown': self.render_markdown_checkbox.isChecked(),
             'line_numbers': self.line_numbers_checkbox.isChecked(),
-            'monospace': self.monospace_checkbox.isChecked()
+            'monospace': self.monospace_checkbox.isChecked(),
+            'recent_groups': self.recent_groups
         }
 
         # Auto-save current session
@@ -1793,6 +1908,12 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             # Restore monospace font preference (default to False)
             monospace = settings.get('monospace', False)
             self.monospace_checkbox.setChecked(monospace)
+
+            # Restore recent groups history
+            self.recent_groups = settings.get('recent_groups', [])
+            # Filter out any files that no longer exist
+            self.recent_groups = [p for p in self.recent_groups if os.path.exists(p)]
+            self.update_history_combo()
 
             if self.current_tabs_file:
                 self.update_window_title()
