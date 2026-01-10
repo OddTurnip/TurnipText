@@ -671,8 +671,8 @@ class TextEditorWindow(QMainWindow):
             self._saving_files.add(tab.file_path)
             tab.save_file()
             self.tab_list.update_tab_display(tab)
-            # Update Save All button in case all files are now saved
-            self.update_save_all_button()
+            # Update save buttons now that the file is saved
+            self._update_save_buttons()
         else:
             # Need to prompt for save location
             default_folder = self.get_default_file_folder()
@@ -695,8 +695,8 @@ class TextEditorWindow(QMainWindow):
                 tab.save_file(file_path)
                 self._watch_file(file_path)  # Start watching the new file
                 self.tab_list.update_tab_display(tab)
-                # Update Save All button in case all files are now saved
-                self.update_save_all_button()
+                # Update save buttons now that the file is saved
+                self._update_save_buttons()
 
     def save_all(self):
         """Save all modified files and the group"""
@@ -723,8 +723,12 @@ class TextEditorWindow(QMainWindow):
             self.last_saved_all_label.setVisible(True)
 
         # Update button appearances
-        self.update_save_all_button()
+        self._update_save_buttons()
+
+    def _update_save_buttons(self):
+        """Update both Save and Save All button appearances after any save-related state change."""
         self.update_save_button()
+        self.update_save_all_button()
 
     def update_save_button(self):
         """Update the Save button appearance based on whether current tab has unsaved changes"""
@@ -1325,8 +1329,7 @@ class TextEditorWindow(QMainWindow):
         """Update the title of a tab"""
         self.tab_list.update_tab_display(tab)
         # Update Save buttons when any tab changes
-        self.update_save_all_button()
-        self.update_save_button()
+        self._update_save_buttons()
 
     def update_window_title(self):
         """Update the window title based on tab group name or current tabs file"""
