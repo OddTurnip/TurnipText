@@ -276,7 +276,9 @@ class TabListWidget(QWidget):
 
     def hide_drop_indicator(self):
         """Hide the drop indicator"""
-        if self.drop_indicator.isVisible():
+        # Use isHidden() check instead of isVisible() since isVisible() returns False
+        # when widget or parents aren't shown, even if the widget itself is not hidden
+        if not self.drop_indicator.isHidden():
             self.tab_layout.removeWidget(self.drop_indicator)
             self.drop_indicator.setVisible(False)
             self.drop_indicator_index = -1
@@ -285,7 +287,7 @@ class TabListWidget(QWidget):
         """Show drop indicator at specified index"""
         if self.drop_indicator_index != index:
             # Remove from old position
-            if self.drop_indicator.isVisible():
+            if not self.drop_indicator.isHidden():
                 self.tab_layout.removeWidget(self.drop_indicator)
 
             # Clamp index to valid range
