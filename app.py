@@ -300,6 +300,9 @@ class TextEditorWindow(QMainWindow):
             QComboBox:hover {
                 border: 1px solid #909090;
             }
+            QComboBox::drop-down {
+                border-left: 1px solid black;
+            }
         """
         self.history_combo.setStyleSheet(combo_style)
         toolbar_row2.addWidget(self.history_combo)
