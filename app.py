@@ -6,15 +6,12 @@ Features: Multiple tabs, save/load files, save/load tab sessions
 
 import sys
 import os
-import json
 from pathlib import Path
-import xml.etree.ElementTree as ET
-from xml.dom import minidom
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMessageBox, QWidget,
     QVBoxLayout, QHBoxLayout, QPushButton, QSplitter, QStackedWidget,
-    QLabel, QFrame, QDialog, QLineEdit, QCheckBox, QComboBox
+    QLabel, QFrame, QLineEdit, QCheckBox, QComboBox, QDialog
 )
 from PyQt6.QtCore import Qt, QSize, QDateTime, QFileSystemWatcher
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence, QIcon, QGuiApplication
@@ -24,6 +21,13 @@ from models.tab_list_item_model import TextEditorTab
 from widgets.tab_list import TabListWidget
 from windows.find_replace import FindReplaceDialog
 from windows.icon_editor import IconEditorDialog
+from windows.dialogs import (
+    EditTabDialog, EditGroupDialog, AboutDialog,
+    UnsavedChangesDialog, UnsavedGroupDialog, GroupChangeWarningDialog
+)
+from styles import BUTTON_STYLE, MODIFIED_BUTTON_STYLE
+from managers.tab_groups import TabGroupManager, get_tabs_data_from_widgets
+from managers.settings import SettingsManager, get_tabs_data_for_session
 
 
 def get_app_dir():
@@ -51,15 +55,17 @@ class TextEditorWindow(QMainWindow):
 
     def __init__(self, tabs_file=None):
         super().__init__()
-        self.current_tabs_file = None
         self.last_file_folder = None
         self.last_tabs_folder = None
-        self.settings_file = os.path.join(get_app_dir(), '.editor_settings.json')
-        self.tab_group_name = None  # Custom name for the tab group (used as window title)
-        self._baseline_tab_state = None  # Baseline state for comparison (set when loading/saving .tabs)
         self._initial_splitter_set = False  # Track if initial splitter position has been applied
         self.find_replace_dialog = None  # Will be created when first needed
-        self.recent_groups = []  # List of recently loaded .tabs files (max 10)
+
+        # Settings manager handles preferences and session persistence
+        settings_file = os.path.join(get_app_dir(), '.editor_settings.json')
+        self.settings_manager = SettingsManager(settings_file)
+
+        # Tab group manager handles save/load operations and state tracking
+        self.tab_group_manager = TabGroupManager()
 
         # File system watcher for detecting external changes
         self.file_watcher = QFileSystemWatcher(self)
@@ -159,28 +165,8 @@ class TextEditorWindow(QMainWindow):
         toolbar_main_layout.setContentsMargins(8, 8, 8, 8)
         toolbar_main_layout.setSpacing(5)
 
-        # Define button style
-        button_style = """
-            QPushButton {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #F8F8F8, stop:1 #E0E0E0);
-                border: 1px solid #B0B0B0;
-                border-radius: 6px;
-                padding: 6px 12px;
-                min-height: 24px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #FFFFFF, stop:1 #E8E8E8);
-                border: 1px solid #909090;
-            }
-            QPushButton:pressed {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #D0D0D0, stop:1 #C0C0C0);
-                border: 1px solid #808080;
-            }
-        """
+        # Use centralized button style
+        button_style = BUTTON_STYLE
 
         # Store the default button style for later use
         self.default_button_style = button_style
@@ -454,8 +440,8 @@ class TextEditorWindow(QMainWindow):
             return self.last_tabs_folder
 
         # Otherwise, use the current tabs file location
-        if self.current_tabs_file:
-            folder = os.path.dirname(self.current_tabs_file)
+        if self.tab_group_manager.current_tabs_file:
+            folder = os.path.dirname(self.tab_group_manager.current_tabs_file)
             if os.path.exists(folder):
                 return folder
 
@@ -712,8 +698,8 @@ class TextEditorWindow(QMainWindow):
                     saved_count += 1
 
         # Also save the group if there's a location
-        if self.current_tabs_file:
-            self.save_tabs(self.current_tabs_file)
+        if self.tab_group_manager.current_tabs_file:
+            self.save_tabs(self.tab_group_manager.current_tabs_file)
 
         # Update last saved timestamp if anything was saved
         if saved_count > 0:
@@ -736,32 +722,9 @@ class TextEditorWindow(QMainWindow):
         has_unsaved = current_tab and current_tab.is_modified
 
         if has_unsaved:
-            # Highlight button with yellow/warning color
-            modified_style = """
-                QPushButton {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFDE7, stop:1 #FFF9C4);
-                    border: 1px solid #F9A825;
-                    border-radius: 6px;
-                    padding: 6px 12px;
-                    min-height: 24px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFEF0, stop:1 #FFEB3B);
-                    border: 1px solid #F57F17;
-                }
-                QPushButton:pressed {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFF59D, stop:1 #FBC02D);
-                    border: 1px solid #E65100;
-                }
-            """
-            self.save_btn.setStyleSheet(modified_style)
+            self.save_btn.setStyleSheet(MODIFIED_BUTTON_STYLE)
             self.save_btn.setText("⚠️ Save")
         else:
-            # Reset to default style
             self.save_btn.setStyleSheet(self.default_button_style)
             self.save_btn.setText("💾 Save")
 
@@ -776,37 +739,14 @@ class TextEditorWindow(QMainWindow):
                 break
 
         # Check for unsaved group changes
-        has_unsaved_group = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
+        has_unsaved_group = (self.tab_group_manager.current_tabs_file or self.tab_group_manager.tab_group_name) and self._has_tab_state_changed()
 
         has_unsaved = has_unsaved_files or has_unsaved_group
 
         if has_unsaved:
-            # Highlight button with yellow/warning color
-            modified_style = """
-                QPushButton {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFDE7, stop:1 #FFF9C4);
-                    border: 1px solid #F9A825;
-                    border-radius: 6px;
-                    padding: 6px 12px;
-                    min-height: 24px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFEF0, stop:1 #FFEB3B);
-                    border: 1px solid #F57F17;
-                }
-                QPushButton:pressed {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFF59D, stop:1 #FBC02D);
-                    border: 1px solid #E65100;
-                }
-            """
-            self.save_all_btn.setStyleSheet(modified_style)
+            self.save_all_btn.setStyleSheet(MODIFIED_BUTTON_STYLE)
             self.save_all_btn.setText("⚠️ Save All Changes")
         else:
-            # Reset to default style
             self.save_all_btn.setStyleSheet(self.default_button_style)
             self.save_all_btn.setText("💾 Save All Changes")
 
@@ -1042,8 +982,6 @@ class TextEditorWindow(QMainWindow):
 
     def edit_selected_emoji(self):
         """Edit the emoji and display name for the selected tab"""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QCheckBox
-
         # Find the selected tab
         selected_tab_item = None
         for tab_item in self.tab_list.tab_items:
@@ -1055,193 +993,25 @@ class TextEditorWindow(QMainWindow):
             QMessageBox.information(self, "No Tab Selected", "Please select a tab first.")
             return
 
-        # Create custom dialog
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Edit Tab Appearance")
-        layout = QVBoxLayout()
-
-        # Style for input fields
-        input_style = """
-            QLineEdit {
-                background-color: white;
-                border: 1px solid #B0B0B0;
-                border-radius: 3px;
-                padding: 4px 8px;
-                min-height: 20px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #2196F3;
-            }
-        """
-
-        # Style for dialog buttons
-        button_style = """
-            QPushButton {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #F8F8F8, stop:1 #E0E0E0);
-                border: 1px solid #B0B0B0;
-                border-radius: 4px;
-                padding: 6px 16px;
-                min-width: 60px;
-                min-height: 22px;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #FFFFFF, stop:1 #E8E8E8);
-                border: 1px solid #909090;
-            }
-            QPushButton:pressed {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #D0D0D0, stop:1 #C0C0C0);
-                border: 1px solid #808080;
-            }
-        """
-
-        # Emoji input
-        emoji_layout = QHBoxLayout()
-        emoji_label = QLabel("Emoji:")
-        emoji_label.setFixedWidth(100)
-        emoji_layout.addWidget(emoji_label)
-        emoji_input = QLineEdit()
-        emoji_input.setText(selected_tab_item.get_emoji())
-        emoji_input.setPlaceholderText("e.g., 📄 or P")
-        emoji_input.setStyleSheet(input_style)
-        emoji_layout.addWidget(emoji_input)
-
-        # Hint label (shown when icon overrides emoji)
-        emoji_hint = QLabel("(icon overrides)")
-        emoji_hint.setStyleSheet("color: #666666; font-style: italic;")
-        emoji_hint.setVisible(selected_tab_item.custom_icon is not None)
-        emoji_layout.addWidget(emoji_hint)
-
-        layout.addLayout(emoji_layout)
-
-        # Custom icon section
-        icon_layout = QHBoxLayout()
-        icon_label = QLabel("Icon:")
-        icon_label.setFixedWidth(100)
-        icon_layout.addWidget(icon_label)
-
-        # Track pending icon change
-        pending_icon = [selected_tab_item.custom_icon]  # Use list to allow mutation in closure
-
-        # Icon status label
-        icon_status = QLabel()
-        if selected_tab_item.custom_icon:
-            icon_status.setText("Custom icon set")
-            icon_status.setStyleSheet("color: #4CAF50;")
-        else:
-            icon_status.setText("No custom icon")
-            icon_status.setStyleSheet("color: #666666;")
-        icon_layout.addWidget(icon_status)
-
-        icon_layout.addStretch()
-
-        # Remove icon button (only shown when icon is set)
-        remove_icon_btn = QPushButton("Remove")
-        remove_icon_btn.setStyleSheet(button_style)
-        remove_icon_btn.setVisible(selected_tab_item.custom_icon is not None)
-
-        def remove_icon():
-            pending_icon[0] = None
-            icon_status.setText("Icon will be removed")
-            icon_status.setStyleSheet("color: #FF9800;")
-            emoji_hint.setVisible(False)
-            remove_icon_btn.setVisible(False)
-
-        remove_icon_btn.clicked.connect(remove_icon)
-        icon_layout.addWidget(remove_icon_btn)
-
-        # Upload icon button
-        upload_icon_btn = QPushButton("Upload...")
-        upload_icon_btn.setStyleSheet(button_style)
-
-        def open_icon_editor():
-            icon_dialog = IconEditorDialog(dialog, pending_icon[0])
-            if icon_dialog.exec() == QDialog.DialogCode.Accepted:
-                result = icon_dialog.get_icon_filename()
-                if result == "":
-                    # Icon removed (from icon editor dialog)
-                    remove_icon()
-                elif result:
-                    # New icon set
-                    pending_icon[0] = result
-                    icon_status.setText("New icon selected")
-                    icon_status.setStyleSheet("color: #4CAF50;")
-                    emoji_hint.setVisible(True)
-                    remove_icon_btn.setVisible(True)
-
-        upload_icon_btn.clicked.connect(open_icon_editor)
-        icon_layout.addWidget(upload_icon_btn)
-        layout.addLayout(icon_layout)
-
-        # Display name input
-        name_layout = QHBoxLayout()
-        name_label = QLabel("Display Name:")
-        name_label.setFixedWidth(100)
-        name_layout.addWidget(name_label)
-        name_input = QLineEdit()
-        name_input.setText(selected_tab_item.custom_display_name or "")
-        # Show what the default display name will be (without custom override)
-        default_name = "Untitled"
-        if selected_tab_item.editor_tab.file_path:
-            filename = os.path.basename(selected_tab_item.editor_tab.file_path)
-            name_without_ext = os.path.splitext(filename)[0]
-            default_name = name_without_ext.lstrip('_') or filename
-        name_input.setPlaceholderText(f"Default: {default_name}")
-        name_input.setStyleSheet(input_style)
-        name_layout.addWidget(name_input)
-        layout.addLayout(name_layout)
-
-        # Pin checkbox
-        pin_layout = QHBoxLayout()
-        pin_label = QLabel("")
-        pin_label.setFixedWidth(100)
-        pin_layout.addWidget(pin_label)
-        pin_checkbox = QCheckBox("📌 Pin this tab")
-        pin_checkbox.setChecked(selected_tab_item.editor_tab.is_pinned)
-        pin_layout.addWidget(pin_checkbox)
-        pin_layout.addStretch()
-        layout.addLayout(pin_layout)
-
-        # Buttons
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        ok_btn = QPushButton("OK")
-        ok_btn.setStyleSheet(button_style)
-        ok_btn.clicked.connect(dialog.accept)
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setStyleSheet(button_style)
-        cancel_btn.clicked.connect(dialog.reject)
-        button_layout.addWidget(ok_btn)
-        button_layout.addWidget(cancel_btn)
-        layout.addLayout(button_layout)
-
-        dialog.setLayout(layout)
-        dialog.setMinimumWidth(400)
-
+        dialog = EditTabDialog(selected_tab_item, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            # Update custom icon if changed
-            if pending_icon[0] != selected_tab_item.custom_icon:
-                selected_tab_item.custom_icon = pending_icon[0]
+            icon, emoji, display_name, pinned = dialog.get_results()
 
-            # Always save emoji (preserved even when icon is set)
-            new_emoji = emoji_input.text().strip()
-            if new_emoji and new_emoji != selected_tab_item.get_emoji():
-                selected_tab_item.custom_emoji = new_emoji
-            elif not new_emoji:
+            # Update custom icon if changed
+            if icon != selected_tab_item.custom_icon:
+                selected_tab_item.custom_icon = icon
+
+            # Update emoji
+            if emoji and emoji != selected_tab_item.get_emoji():
+                selected_tab_item.custom_emoji = emoji
+            elif not emoji:
                 selected_tab_item.custom_emoji = None
 
-            # Update display name if changed
-            new_name = name_input.text().strip()
-            if new_name:
-                selected_tab_item.custom_display_name = new_name
-            else:
-                selected_tab_item.custom_display_name = None
+            # Update display name
+            selected_tab_item.custom_display_name = display_name
 
             # Update pin status if changed
-            new_pin_status = pin_checkbox.isChecked()
-            if new_pin_status != selected_tab_item.editor_tab.is_pinned:
+            if pinned != selected_tab_item.editor_tab.is_pinned:
                 self.toggle_pin(selected_tab_item.editor_tab)
 
             selected_tab_item.update_display()
@@ -1257,7 +1027,7 @@ class TextEditorWindow(QMainWindow):
     def _get_current_tab_state(self):
         """Get a snapshot of the current tab state for comparison."""
         state = {
-            'tab_group_name': self.tab_group_name,
+            'tab_group_name': self.tab_group_manager.tab_group_name,
             'tabs': []
         }
         for i in range(self.content_stack.count()):
@@ -1279,44 +1049,20 @@ class TextEditorWindow(QMainWindow):
 
     def _set_baseline_tab_state(self):
         """Set the baseline state to compare against."""
-        self._baseline_tab_state = self._get_current_tab_state()
+        self.tab_group_manager.set_baseline_state(self._get_current_tab_state())
 
     def _has_tab_state_changed(self):
         """Check if the current tab state differs from the baseline."""
-        if self._baseline_tab_state is None:
-            return False
-        return self._get_current_tab_state() != self._baseline_tab_state
+        return self.tab_group_manager.has_state_changed(self._get_current_tab_state())
 
     def update_save_group_button(self):
         """Update the Save Group button appearance based on whether state has changed."""
         # Only show as modified if there's a tabs file or tab group name to save to
-        has_changes = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
+        has_changes = (self.tab_group_manager.current_tabs_file or self.tab_group_manager.tab_group_name) and self._has_tab_state_changed()
 
         if has_changes:
             self.save_group_btn.setText("⚠️ Save Group")
-            # Override button style with yellow background
-            modified_style = """
-                QPushButton {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFDE7, stop:1 #FFF9C4);
-                    border: 1px solid #F9A825;
-                    border-radius: 6px;
-                    padding: 6px 12px;
-                    min-height: 24px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFEF0, stop:1 #FFEB3B);
-                    border: 1px solid #F57F17;
-                }
-                QPushButton:pressed {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFF59D, stop:1 #FBC02D);
-                    border: 1px solid #E65100;
-                }
-            """
-            self.save_group_btn.setStyleSheet(modified_style)
+            self.save_group_btn.setStyleSheet(MODIFIED_BUTTON_STYLE)
         else:
             self.save_group_btn.setText("💾 Save Group")
             self.save_group_btn.setStyleSheet(self.default_button_style)
@@ -1333,200 +1079,19 @@ class TextEditorWindow(QMainWindow):
 
     def update_window_title(self):
         """Update the window title based on tab group name or current tabs file"""
-        if self.tab_group_name:
-            self.setWindowTitle(self.tab_group_name)
-        elif self.current_tabs_file:
-            filename = os.path.basename(self.current_tabs_file)
-            # Remove .tabs extension for display
-            if filename.endswith('.tabs'):
-                filename = filename[:-5]
-            self.setWindowTitle(filename)
-        else:
-            self.setWindowTitle("TurnipText")
+        self.setWindowTitle(self.tab_group_manager.get_window_title())
 
     def edit_tabs_dialog(self):
         """Show dialog to edit tab group name"""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel
-
-        # Create custom dialog
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Edit Tab Group")
-        layout = QVBoxLayout()
-
-        # Style for input fields
-        input_style = """
-            QLineEdit {
-                background-color: white;
-                border: 1px solid #B0B0B0;
-                border-radius: 3px;
-                padding: 4px 8px;
-                min-height: 20px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #2196F3;
-            }
-        """
-
-        # Style for dialog buttons
-        button_style = """
-            QPushButton {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #F8F8F8, stop:1 #E0E0E0);
-                border: 1px solid #B0B0B0;
-                border-radius: 4px;
-                padding: 6px 16px;
-                min-width: 60px;
-                min-height: 22px;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #FFFFFF, stop:1 #E8E8E8);
-                border: 1px solid #909090;
-            }
-            QPushButton:pressed {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #D0D0D0, stop:1 #C0C0C0);
-                border: 1px solid #808080;
-            }
-        """
-
-        # Tab group name input
-        name_layout = QHBoxLayout()
-        name_label = QLabel("Tab Group Name:")
-        name_label.setFixedWidth(120)
-        name_layout.addWidget(name_label)
-        name_input = QLineEdit()
-        name_input.setText(self.tab_group_name or "")
-        # Show default name based on tabs file
-        default_name = "TurnipText"
-        if self.current_tabs_file:
-            filename = os.path.basename(self.current_tabs_file)
-            if filename.endswith('.tabs'):
-                default_name = filename[:-5]
-        name_input.setPlaceholderText(f"Default: {default_name}")
-        name_input.setStyleSheet(input_style)
-        name_layout.addWidget(name_input)
-        layout.addLayout(name_layout)
-
-        # Info label
-        info_label = QLabel("This name will be used as the window title and saved in the .tabs file.")
-        info_label.setStyleSheet("color: #666666; font-style: italic; margin-top: 5px;")
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
-
-        # Buttons
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        ok_btn = QPushButton("OK")
-        ok_btn.setStyleSheet(button_style)
-        ok_btn.clicked.connect(dialog.accept)
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setStyleSheet(button_style)
-        cancel_btn.clicked.connect(dialog.reject)
-        button_layout.addWidget(ok_btn)
-        button_layout.addWidget(cancel_btn)
-        layout.addLayout(button_layout)
-
-        dialog.setLayout(layout)
-        dialog.setMinimumWidth(400)
-
+        dialog = EditGroupDialog(self.tab_group_manager.tab_group_name, self.tab_group_manager.current_tabs_file, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            new_name = name_input.text().strip()
-            if new_name:
-                self.tab_group_name = new_name
-            else:
-                self.tab_group_name = None
-
+            self.tab_group_manager.tab_group_name = dialog.get_result()
             self.update_window_title()
             self.mark_tabs_metadata_modified()
 
     def show_about_dialog(self):
         """Show the About dialog with keyboard shortcuts and info"""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QLabel
-
-        # Create custom dialog
-        dialog = QDialog(self)
-        dialog.setWindowTitle("About TurnipText")
-        layout = QVBoxLayout()
-
-        # Title
-        title_label = QLabel("<h2>TurnipText Editor</h2>")
-        layout.addWidget(title_label)
-
-        # Keyboard shortcuts section
-        shortcuts_label = QLabel("<h3>Keyboard Shortcuts</h3>")
-        layout.addWidget(shortcuts_label)
-
-        shortcuts_text = QLabel("""
-<table cellpadding="5">
-  <tr><td><b>Ctrl+N</b></td><td>New file</td></tr>
-  <tr><td><b>Ctrl+O</b></td><td>Open file</td></tr>
-  <tr><td><b>Ctrl+S</b></td><td>Save current tab</td></tr>
-  <tr><td><b>Ctrl+Shift+S</b></td><td>Save all files</td></tr>
-  <tr><td><b>Ctrl+F</b></td><td>Find &amp; Replace</td></tr>
-  <tr><td><b>Ctrl+H</b></td><td>Find &amp; Replace</td></tr>
-  <tr><td><b>Ctrl+I</b></td><td>Document statistics</td></tr>
-  <tr><td><b>Ctrl+Z</b></td><td>Undo</td></tr>
-  <tr><td><b>Ctrl+Y</b></td><td>Redo</td></tr>
-</table>
-        """)
-        layout.addWidget(shortcuts_text)
-
-        # Fonts section
-        fonts_label = QLabel("<h3>Fonts</h3>")
-        layout.addWidget(fonts_label)
-
-        fonts_text = QLabel("""
-<b>Line numbers:</b> Calibri<br>
-<b>Editor:</b> System default (or Consolas with Monospace checkbox)
-        """)
-        layout.addWidget(fonts_text)
-
-        # About section
-        about_label = QLabel("<h3>About</h3>")
-        layout.addWidget(about_label)
-
-        about_text = QLabel("""
-A free text editor created by <a href="https://oddturnip.com">OddTurnip.com</a>,
-using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
-        """)
-        about_text.setOpenExternalLinks(True)  # Enable clickable links
-        about_text.setWordWrap(True)
-        layout.addWidget(about_text)
-
-        # Close button
-        button_style = """
-            QPushButton {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #F8F8F8, stop:1 #E0E0E0);
-                border: 1px solid #B0B0B0;
-                border-radius: 4px;
-                padding: 6px 16px;
-                min-width: 80px;
-                min-height: 22px;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #FFFFFF, stop:1 #E8E8E8);
-                border: 1px solid #909090;
-            }
-            QPushButton:pressed {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 #D0D0D0, stop:1 #C0C0C0);
-                border: 1px solid #808080;
-            }
-        """
-        close_btn = QPushButton("Close")
-        close_btn.setStyleSheet(button_style)
-        close_btn.clicked.connect(dialog.accept)
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(close_btn)
-        layout.addLayout(button_layout)
-
-        dialog.setLayout(layout)
-        dialog.setMinimumWidth(450)
+        dialog = AboutDialog(self)
         dialog.exec()
 
     def new_group_dialog(self):
@@ -1566,8 +1131,8 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             self.tab_list.clear_all_tabs()
 
             # Set the new group location
-            self.current_tabs_file = file_path
-            self.tab_group_name = None
+            self.tab_group_manager.current_tabs_file = file_path
+            self.tab_group_manager.tab_group_name = None
 
             # Update window title
             self.update_window_title()
@@ -1577,9 +1142,9 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
 
     def save_group(self):
         """Save tab group to current location without prompting"""
-        if self.current_tabs_file:
+        if self.tab_group_manager.current_tabs_file:
             # We have a location, save directly
-            self.save_tabs(self.current_tabs_file)
+            self.save_tabs(self.tab_group_manager.current_tabs_file)
         else:
             # No location yet, prompt for one
             self.save_group_as_dialog()
@@ -1636,65 +1201,39 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
 
     def save_tabs(self, tabs_file_path):
         """Save all open tabs to an XML file"""
-        # Create XML structure
-        root = ET.Element('tabs')
-        root.set('version', '1.0')
+        # Extract tabs data from widgets
+        tabs_data = get_tabs_data_from_widgets(
+            self.content_stack, self.tab_list, TextEditorTab
+        )
 
-        # Save tab group name if set
-        if self.tab_group_name:
-            root.set('name', self.tab_group_name)
-
-        # Determine current tab
+        # Determine current tab index
         current_tab = self.get_current_tab()
         current_index = 0
-        tab_count = 0
+        for i, tab_data in enumerate(tabs_data):
+            # Find widget with matching path
+            for j in range(self.content_stack.count()):
+                widget = self.content_stack.widget(j)
+                if isinstance(widget, TextEditorTab) and widget.file_path == tab_data['path']:
+                    if widget == current_tab:
+                        current_index = i
+                    break
 
-        # Save all tabs (pinned tabs are already at the top in tab_list)
-        for i in range(self.content_stack.count()):
-            widget = self.content_stack.widget(i)
-            if isinstance(widget, TextEditorTab) and widget.file_path:
-                tab_elem = ET.SubElement(root, 'tab')
-                tab_elem.set('path', widget.file_path)
-                tab_elem.set('pinned', str(widget.is_pinned))
+        # Save using the manager
+        if self.tab_group_manager.save_tabs_to_file(tabs_file_path, tabs_data, current_index):
+            # Update window title
+            self.update_window_title()
 
-                # Save custom emoji, icon, and display name if set
-                for tab_item in self.tab_list.tab_items:
-                    if tab_item.editor_tab == widget:
-                        if tab_item.custom_icon:
-                            tab_elem.set('icon', tab_item.custom_icon)
-                        if tab_item.custom_emoji:
-                            tab_elem.set('emoji', tab_item.custom_emoji)
-                        if tab_item.custom_display_name:
-                            tab_elem.set('display_name', tab_item.custom_display_name)
-                        break
+            # Update last saved timestamp
+            timestamp = self.tab_group_manager.get_last_saved_timestamp()
+            self.last_saved_label.setText(f"Saved group {timestamp}")
+            self.last_saved_label.setVisible(True)
 
-                if widget == current_tab:
-                    current_index = tab_count
-                tab_count += 1
+            # Set baseline state and update button appearance
+            self._set_baseline_tab_state()
+            self.update_save_group_button()
 
-        root.set('current', str(current_index))
-
-        # Write XML to file with pretty formatting
-        xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
-        with open(tabs_file_path, 'w', encoding='utf-8') as f:
-            f.write(xml_str)
-
-        # Update current tabs file and window title
-        self.current_tabs_file = tabs_file_path
-        self.update_window_title()
-
-        # Update last saved timestamp
-        from datetime import datetime
-        current_time = datetime.now().strftime("%H:%M")
-        self.last_saved_label.setText(f"Saved group {current_time}")
-        self.last_saved_label.setVisible(True)
-
-        # Set baseline state and update button appearance
-        self._set_baseline_tab_state()
-        self.update_save_group_button()
-
-        # Add to recent groups history
-        self.add_to_recent_groups(tabs_file_path)
+            # Update history combo
+            self.update_history_combo()
 
     def _check_unsaved_before_group_change(self):
         """Check for unsaved changes before switching groups. Returns True if safe to proceed."""
@@ -1709,58 +1248,20 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                     unsaved_files.append("Untitled")
 
         # Check for unsaved group changes
-        has_group_changes = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
+        has_group_changes = (self.tab_group_manager.current_tabs_file or self.tab_group_manager.tab_group_name) and self._has_tab_state_changed()
 
         if not unsaved_files and not has_group_changes:
             return True  # No unsaved changes, safe to proceed
 
-        # Build warning message
-        message_parts = []
-        if unsaved_files:
-            message_parts.append("Unsaved file changes:\n" + "\n".join(f"  • {name}" for name in unsaved_files))
-        if has_group_changes:
-            group_name = self.tab_group_name or os.path.basename(self.current_tabs_file or "current group")
-            message_parts.append(f"Unsaved group changes: {group_name}")
-
-        message = "\n\n".join(message_parts)
-        message += "\n\nDo you want to save before switching groups?"
-
-        # Create custom dialog with Save All, Don't Save, Cancel buttons
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Unsaved Changes")
-        layout = QVBoxLayout()
-
-        label = QLabel(message)
-        label.setWordWrap(True)
-        layout.addWidget(label)
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(lambda: dialog.done(0))
-        button_layout.addWidget(cancel_btn)
-
-        dont_save_btn = QPushButton("Don't Save")
-        dont_save_btn.clicked.connect(lambda: dialog.done(1))
-        button_layout.addWidget(dont_save_btn)
-
-        save_btn = QPushButton("Save All Changes")
-        save_btn.clicked.connect(lambda: dialog.done(2))
-        save_btn.setDefault(True)
-        button_layout.addWidget(save_btn)
-
-        layout.addLayout(button_layout)
-        dialog.setLayout(layout)
-        dialog.setMinimumWidth(400)
-
+        group_name = self.tab_group_manager.tab_group_name or os.path.basename(self.tab_group_manager.current_tabs_file or "current group")
+        dialog = GroupChangeWarningDialog(unsaved_files, has_group_changes, group_name, self)
         result = dialog.exec()
 
-        if result == 0:  # Cancel
+        if result == GroupChangeWarningDialog.CANCEL:
             return False
-        elif result == 2:  # Save All Changes
+        elif result == GroupChangeWarningDialog.SAVE_ALL:
             self.save_all()
-        # result == 1: Don't Save - just proceed
+        # DONT_SAVE - just proceed
 
         return True
 
@@ -1786,98 +1287,81 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
 
     def load_tabs(self, tabs_file_path):
         """Load tabs from an XML file"""
-        try:
-            # Parse XML file
-            tree = ET.parse(tabs_file_path)
-            root = tree.getroot()
+        # Load data using the manager
+        tabs_data, current_index, group_name = self.tab_group_manager.load_tabs_from_file(tabs_file_path)
 
-            # Close all existing tabs
-            while self.content_stack.count() > 0:
-                widget = self.content_stack.widget(0)
-                if hasattr(widget, 'file_path') and widget.file_path:
-                    self._unwatch_file(widget.file_path)
-                self.content_stack.removeWidget(widget)
-                widget.deleteLater()
-            self.tab_list.clear_all_tabs()
+        if tabs_data is None:
+            QMessageBox.critical(self, "Error", f"Failed to load tabs from:\n{tabs_file_path}")
+            return
 
-            # Load tab group name if present
-            self.tab_group_name = root.get('name')  # May be None
+        # Close all existing tabs
+        while self.content_stack.count() > 0:
+            widget = self.content_stack.widget(0)
+            if hasattr(widget, 'file_path') and widget.file_path:
+                self._unwatch_file(widget.file_path)
+            self.content_stack.removeWidget(widget)
+            widget.deleteLater()
+        self.tab_list.clear_all_tabs()
 
-            # Get current tab index
-            current_index = int(root.get('current', '0'))
-            loaded_tabs = []
+        loaded_tabs = []
 
-            # Load each tab
-            for tab_elem in root.findall('tab'):
-                file_path = tab_elem.get('path')
-                is_pinned = tab_elem.get('pinned', 'False') == 'True'
-                custom_icon = tab_elem.get('icon')  # May be None
-                custom_emoji = tab_elem.get('emoji')  # May be None
-                custom_display_name = tab_elem.get('display_name')  # May be None
+        # Create widgets for each tab
+        for tab_data in tabs_data:
+            file_path = tab_data['path']
 
-                if os.path.exists(file_path):
-                    tab = TextEditorTab(file_path)
-                    tab.is_pinned = is_pinned
+            # Only load tabs for existing files
+            if not tab_data.get('exists', os.path.exists(file_path)):
+                continue
 
-                    # Add to content stack and tab list
-                    self.content_stack.addWidget(tab)
-                    tab_item = self.tab_list.add_tab(tab)
-                    self.apply_markdown_to_tab(tab)
-                    self.apply_line_numbers_to_tab(tab)
-                    self.apply_monospace_to_tab(tab)
-                    self._watch_file(file_path)
+            tab = TextEditorTab(file_path)
+            tab.is_pinned = tab_data.get('pinned', False)
 
-                    # Set custom icon, emoji and display name if they were saved
-                    if custom_icon:
-                        tab_item.custom_icon = custom_icon
-                    if custom_emoji:
-                        tab_item.custom_emoji = custom_emoji
-                    if custom_display_name:
-                        tab_item.custom_display_name = custom_display_name
-                    if custom_icon or custom_emoji or custom_display_name:
-                        tab_item.update_display()
+            # Add to content stack and tab list
+            self.content_stack.addWidget(tab)
+            tab_item = self.tab_list.add_tab(tab)
+            self.apply_markdown_to_tab(tab)
+            self.apply_line_numbers_to_tab(tab)
+            self.apply_monospace_to_tab(tab)
+            self._watch_file(file_path)
 
-                    loaded_tabs.append(tab)
+            # Set custom icon, emoji and display name if they were saved
+            custom_icon = tab_data.get('icon')
+            custom_emoji = tab_data.get('emoji')
+            custom_display_name = tab_data.get('display_name')
 
-            # Set current tab
-            if current_index < len(loaded_tabs):
-                current_tab = loaded_tabs[current_index]
-                self.switch_to_tab(current_tab)
-                # Select in tab list
-                for tab_item in self.tab_list.tab_items:
-                    if tab_item.editor_tab == current_tab:
-                        self.tab_list.select_tab(tab_item)
-                        break
+            if custom_icon:
+                tab_item.custom_icon = custom_icon
+            if custom_emoji:
+                tab_item.custom_emoji = custom_emoji
+            if custom_display_name:
+                tab_item.custom_display_name = custom_display_name
+            if custom_icon or custom_emoji or custom_display_name:
+                tab_item.update_display()
 
-            # Update current tabs file and window title
-            self.current_tabs_file = tabs_file_path
-            self.update_window_title()
+            loaded_tabs.append(tab)
 
-            # Set baseline state for change tracking
-            self._set_baseline_tab_state()
+        # Set current tab
+        if current_index < len(loaded_tabs):
+            current_tab = loaded_tabs[current_index]
+            self.switch_to_tab(current_tab)
+            # Select in tab list
+            for tab_item in self.tab_list.tab_items:
+                if tab_item.editor_tab == current_tab:
+                    self.tab_list.select_tab(tab_item)
+                    break
 
-            # Add to recent groups history
-            self.add_to_recent_groups(tabs_file_path)
+        # Update window title
+        self.update_window_title()
 
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load tabs:\n{str(e)}")
+        # Set baseline state for change tracking
+        self._set_baseline_tab_state()
+
+        # Update history combo
+        self.update_history_combo()
 
     def add_to_recent_groups(self, tabs_file_path):
         """Add a tabs file to the recent groups history"""
-        # Convert to absolute path
-        tabs_file_path = os.path.abspath(tabs_file_path)
-
-        # Remove if already in list (to move it to the top)
-        if tabs_file_path in self.recent_groups:
-            self.recent_groups.remove(tabs_file_path)
-
-        # Add to the beginning
-        self.recent_groups.insert(0, tabs_file_path)
-
-        # Keep only the 10 most recent
-        self.recent_groups = self.recent_groups[:10]
-
-        # Update the combo box
+        self.tab_group_manager.add_to_recent_groups(tabs_file_path)
         self.update_history_combo()
 
     def update_history_combo(self):
@@ -1887,9 +1371,9 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
 
         self.history_combo.clear()
 
-        if self.recent_groups:
+        if self.tab_group_manager.recent_groups:
             self.history_combo.setEnabled(True)
-            for path in self.recent_groups:
+            for path in self.tab_group_manager.recent_groups:
                 # Show just the filename without extension
                 filename = os.path.basename(path)
                 if filename.endswith('.tabs'):
@@ -1902,19 +1386,19 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             self.history_combo.setEnabled(False)
 
         # Reset to first item (or -1 for placeholder)
-        self.history_combo.setCurrentIndex(0 if self.recent_groups else -1)
+        self.history_combo.setCurrentIndex(0 if self.tab_group_manager.recent_groups else -1)
 
         self.history_combo.blockSignals(False)
 
     def _on_history_selected(self, index):
         """Handle selection from history dropdown"""
-        if index < 0 or not self.recent_groups:
+        if index < 0 or not self.tab_group_manager.recent_groups:
             return
 
         path = self.history_combo.itemData(index)
         if path and os.path.exists(path):
             # Don't reload if it's the current file
-            if path != self.current_tabs_file:
+            if path != self.tab_group_manager.current_tabs_file:
                 # Check for unsaved changes first
                 if not self._check_unsaved_before_group_change():
                     # User cancelled - reset combo to current group
@@ -1928,11 +1412,23 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                 "File Not Found",
                 f"The group file no longer exists:\n{path}\n\nIt will be removed from history."
             )
-            self.recent_groups.remove(path)
+            self.tab_group_manager.recent_groups.remove(path)
             self.update_history_combo()
 
     def save_settings(self):
         """Save window settings and current session"""
+        # Get current tab index
+        current_tab = self.get_current_tab()
+        tabs_data = get_tabs_data_for_session(self.content_stack, self.tab_list, TextEditorTab)
+        current_index = 0
+        for i, tab_data in enumerate(tabs_data):
+            for j in range(self.content_stack.count()):
+                widget = self.content_stack.widget(j)
+                if isinstance(widget, TextEditorTab) and widget.file_path == tab_data['path']:
+                    if widget == current_tab:
+                        current_index = i
+                    break
+
         settings = {
             'geometry': {
                 'x': self.x(),
@@ -1942,190 +1438,115 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
             },
             'last_file_folder': self.last_file_folder,
             'last_tabs_folder': self.last_tabs_folder,
-            'current_tabs_file': self.current_tabs_file,
+            'current_tabs_file': self.tab_group_manager.current_tabs_file,
             'view_mode': self.tab_list.view_mode,
             'render_markdown': self.render_markdown_checkbox.isChecked(),
             'line_numbers': self.line_numbers_checkbox.isChecked(),
             'monospace': self.monospace_checkbox.isChecked(),
-            'recent_groups': self.recent_groups
+            'recent_groups': self.tab_group_manager.recent_groups,
+            'auto_session': self.settings_manager.build_auto_session(
+                tabs_data, current_index, self.tab_group_manager.tab_group_name
+            )
         }
 
-        # Auto-save current session
-        auto_session = {
-            'tabs': [],
-            'current_index': 0,
-            'tab_group_name': self.tab_group_name
-        }
-
-        current_tab = self.get_current_tab()
-        tab_count = 0
-
-        for i in range(self.content_stack.count()):
-            widget = self.content_stack.widget(i)
-            if isinstance(widget, TextEditorTab) and widget.file_path:
-                tab_data = {
-                    'path': widget.file_path,
-                    'pinned': widget.is_pinned
-                }
-
-                # Save custom icon, emoji and display name if set
-                for tab_item in self.tab_list.tab_items:
-                    if tab_item.editor_tab == widget:
-                        if tab_item.custom_icon:
-                            tab_data['icon'] = tab_item.custom_icon
-                        if tab_item.custom_emoji:
-                            tab_data['emoji'] = tab_item.custom_emoji
-                        if tab_item.custom_display_name:
-                            tab_data['display_name'] = tab_item.custom_display_name
-                        break
-
-                auto_session['tabs'].append(tab_data)
-                if widget == current_tab:
-                    auto_session['current_index'] = tab_count
-                tab_count += 1
-
-        settings['auto_session'] = auto_session
-
-        try:
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=2)
-        except Exception as e:
-            print(f"Failed to save settings: {e}")
+        self.settings_manager.save(settings)
 
     def load_settings(self):
         """Load window settings"""
-        if not os.path.exists(self.settings_file):
+        settings = self.settings_manager.load()
+        if not settings:
             return
 
-        try:
-            with open(self.settings_file, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
+        # Restore geometry with screen validation
+        if 'geometry' in settings:
+            screen = QGuiApplication.primaryScreen()
+            geo = self.settings_manager.validate_geometry(
+                settings['geometry'],
+                screen.availableGeometry()
+            )
+            if geo:
+                self.setGeometry(geo['x'], geo['y'], geo['width'], geo['height'])
 
-            # Restore geometry
-            if 'geometry' in settings:
-                geo = settings['geometry']
-                # Get the available screen geometry
-                from PyQt6.QtGui import QGuiApplication
-                screen = QGuiApplication.primaryScreen()
-                screen_geometry = screen.availableGeometry()
+        # Restore last folders
+        self.last_file_folder = self.settings_manager.get('last_file_folder')
+        self.last_tabs_folder = self.settings_manager.get('last_tabs_folder')
+        self.tab_group_manager.current_tabs_file = self.settings_manager.get('current_tabs_file')
 
-                # Ensure window is not too large for screen
-                width = min(geo['width'], screen_geometry.width())
-                height = min(geo['height'], screen_geometry.height())
+        # Restore view mode
+        self.set_tab_view_mode(self.settings_manager.get('view_mode', 'normal'))
 
-                # Ensure window is within screen bounds with padding for title bar
-                # Add 50px minimum from top to ensure title bar is always visible
-                min_top_margin = 50
-                x = max(screen_geometry.x(), min(geo['x'], screen_geometry.right() - width))
-                y = max(screen_geometry.y() + min_top_margin, min(geo['y'], screen_geometry.bottom() - height))
+        # Restore preferences
+        self.render_markdown_checkbox.setChecked(self.settings_manager.get('render_markdown', True))
+        self.line_numbers_checkbox.setChecked(self.settings_manager.get('line_numbers', True))
+        self.monospace_checkbox.setChecked(self.settings_manager.get('monospace', False))
 
-                self.setGeometry(x, y, width, height)
+        # Restore recent groups history
+        self.tab_group_manager.recent_groups = self.settings_manager.get('recent_groups', [])
+        self.tab_group_manager.filter_nonexistent_groups()
+        self.update_history_combo()
 
-            # Restore last folders
-            self.last_file_folder = settings.get('last_file_folder')
-            self.last_tabs_folder = settings.get('last_tabs_folder')
-            self.current_tabs_file = settings.get('current_tabs_file')
-
-            # Restore view mode (this will set the correct splitter size)
-            view_mode = settings.get('view_mode', 'normal')
-            self.set_tab_view_mode(view_mode)
-
-            # Restore markdown rendering preference (default to True)
-            render_markdown = settings.get('render_markdown', True)
-            self.render_markdown_checkbox.setChecked(render_markdown)
-
-            # Restore line numbers preference (default to True)
-            line_numbers = settings.get('line_numbers', True)
-            self.line_numbers_checkbox.setChecked(line_numbers)
-
-            # Restore monospace font preference (default to False)
-            monospace = settings.get('monospace', False)
-            self.monospace_checkbox.setChecked(monospace)
-
-            # Restore recent groups history
-            self.recent_groups = settings.get('recent_groups', [])
-            # Filter out any files that no longer exist
-            self.recent_groups = [p for p in self.recent_groups if os.path.exists(p)]
-            self.update_history_combo()
-
-            if self.current_tabs_file:
-                self.update_window_title()
-
-        except Exception as e:
-            print(f"Failed to load settings: {e}")
+        if self.tab_group_manager.current_tabs_file:
+            self.update_window_title()
 
     def load_auto_session(self):
         """Load auto-saved session"""
-        if not os.path.exists(self.settings_file):
-            # First launch - start with empty editor
+        tabs_data, current_index, tab_group_name = self.settings_manager.get_auto_session()
+        if not tabs_data:
             return
 
-        try:
-            with open(self.settings_file, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
+        loaded_tabs = []
 
-            if 'auto_session' not in settings or not settings['auto_session']['tabs']:
-                # No saved session - start with empty editor
-                return
+        # Restore tab group name if present
+        self.tab_group_manager.tab_group_name = tab_group_name
+        if tab_group_name:
+            self.update_window_title()
 
-            auto_session = settings['auto_session']
-            loaded_tabs = []
+        # Load each tab
+        for tab_data in tabs_data:
+            file_path = tab_data.get('path')
+            if not file_path or not os.path.exists(file_path):
+                continue
 
-            # Restore tab group name if present
-            self.tab_group_name = auto_session.get('tab_group_name')
-            if self.tab_group_name:
-                self.update_window_title()
+            tab = TextEditorTab(file_path)
+            tab.is_pinned = tab_data.get('pinned', False)
 
-            # Load each tab
-            for tab_data in auto_session['tabs']:
-                file_path = tab_data['path']
-                is_pinned = tab_data.get('pinned', False)
-                custom_icon = tab_data.get('icon')  # May be None
-                custom_emoji = tab_data.get('emoji')  # May be None
-                custom_display_name = tab_data.get('display_name')  # May be None
+            # Add to content stack and tab list
+            self.content_stack.addWidget(tab)
+            tab_item = self.tab_list.add_tab(tab)
+            self.apply_markdown_to_tab(tab)
+            self.apply_line_numbers_to_tab(tab)
+            self.apply_monospace_to_tab(tab)
+            self._watch_file(file_path)
 
-                if os.path.exists(file_path):
-                    tab = TextEditorTab(file_path)
-                    tab.is_pinned = is_pinned
+            # Set custom icon, emoji and display name if they were saved
+            custom_icon = tab_data.get('icon')
+            custom_emoji = tab_data.get('emoji')
+            custom_display_name = tab_data.get('display_name')
 
-                    # Add to content stack and tab list
-                    self.content_stack.addWidget(tab)
-                    tab_item = self.tab_list.add_tab(tab)
-                    self.apply_markdown_to_tab(tab)
-                    self.apply_line_numbers_to_tab(tab)
-                    self.apply_monospace_to_tab(tab)
-                    self._watch_file(file_path)
+            if custom_icon:
+                tab_item.custom_icon = custom_icon
+            if custom_emoji:
+                tab_item.custom_emoji = custom_emoji
+            if custom_display_name:
+                tab_item.custom_display_name = custom_display_name
+            if custom_icon or custom_emoji or custom_display_name:
+                tab_item.update_display()
 
-                    # Set custom icon, emoji and display name if they were saved
-                    if custom_icon:
-                        tab_item.custom_icon = custom_icon
-                    if custom_emoji:
-                        tab_item.custom_emoji = custom_emoji
-                    if custom_display_name:
-                        tab_item.custom_display_name = custom_display_name
-                    if custom_icon or custom_emoji or custom_display_name:
-                        tab_item.update_display()
+            loaded_tabs.append(tab)
 
-                    loaded_tabs.append(tab)
+        # Set current tab
+        if current_index < len(loaded_tabs):
+            current_tab = loaded_tabs[current_index]
+            self.switch_to_tab(current_tab)
+            # Select in tab list
+            for tab_item in self.tab_list.tab_items:
+                if tab_item.editor_tab == current_tab:
+                    self.tab_list.select_tab(tab_item)
+                    break
 
-            # Set current tab
-            current_index = auto_session.get('current_index', 0)
-            if current_index < len(loaded_tabs):
-                current_tab = loaded_tabs[current_index]
-                self.switch_to_tab(current_tab)
-                # Select in tab list
-                for tab_item in self.tab_list.tab_items:
-                    if tab_item.editor_tab == current_tab:
-                        self.tab_list.select_tab(tab_item)
-                        break
-
-            # Set baseline state if there's a tabs file to track changes against
-            if self.current_tabs_file:
-                self._set_baseline_tab_state()
-
-        except Exception as e:
-            print(f"Failed to load auto-session: {e}")
-            # On error, start with empty editor
+        # Set baseline state if there's a tabs file to track changes against
+        if self.tab_group_manager.current_tabs_file:
+            self._set_baseline_tab_state()
 
     def closeEvent(self, event):
         """Handle window close event"""
@@ -2148,177 +1569,47 @@ using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
                 modified_tabs.append(file_name)
 
         if modified_tabs:
-            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
-
-            # Create custom dialog
-            dialog = QDialog(self)
-            dialog.setWindowTitle("Unsaved Changes")
-            layout = QVBoxLayout()
-
-            # Message
-            message = QLabel(
-                "The following files have unsaved changes:\n\n" +
-                "\n".join(f"  • {name}" for name in modified_tabs) +
-                "\n\nWhat would you like to do?"
-            )
-            layout.addWidget(message)
-
-            # Button style
-            button_style = """
-                QPushButton {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #F8F8F8, stop:1 #E0E0E0);
-                    border: 1px solid #B0B0B0;
-                    border-radius: 4px;
-                    padding: 8px 16px;
-                    min-width: 100px;
-                    min-height: 28px;
-                }
-                QPushButton:hover {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFFFF, stop:1 #E8E8E8);
-                    border: 1px solid #909090;
-                }
-                QPushButton:pressed {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #D0D0D0, stop:1 #C0C0C0);
-                    border: 1px solid #808080;
-                }
-            """
-
-            # Buttons
-            button_layout = QHBoxLayout()
-            button_layout.addStretch()
-
-            exit_btn = QPushButton("❌ Exit")
-            exit_btn.setToolTip("Exit without saving changes")
-            exit_btn.setStyleSheet(button_style)
-            exit_btn.clicked.connect(lambda: dialog.done(1))  # Exit without saving
-            button_layout.addWidget(exit_btn)
-
-            cancel_btn = QPushButton("🔙 Cancel")
-            cancel_btn.setToolTip("Cancel and return to editing")
-            cancel_btn.setStyleSheet(button_style)
-            cancel_btn.clicked.connect(lambda: dialog.done(0))  # Cancel
-            button_layout.addWidget(cancel_btn)
-
-            save_exit_btn = QPushButton("💾 Save and Exit")
-            save_exit_btn.setToolTip("Save all changes and exit")
-            save_exit_btn.setStyleSheet(button_style)
-            save_exit_btn.clicked.connect(lambda: dialog.done(2))  # Save and exit
-            button_layout.addWidget(save_exit_btn)
-
-            layout.addLayout(button_layout)
-            dialog.setLayout(layout)
-            dialog.setMinimumWidth(400)
-
+            dialog = UnsavedChangesDialog(modified_tabs, self)
             result = dialog.exec()
 
-            if result == 0:  # Cancel
+            if result == UnsavedChangesDialog.CANCEL:
                 event.ignore()
                 return
-            elif result == 2:  # Save and exit
+            elif result == UnsavedChangesDialog.SAVE_AND_EXIT:
                 # Save all files that can be saved
                 for i in range(self.content_stack.count()):
                     widget = self.content_stack.widget(i)
                     if isinstance(widget, TextEditorTab) and widget.is_modified and widget.file_path:
                         widget.save_file()
-            # result == 1: Exit without saving, just continue
+            # EXIT_WITHOUT_SAVING - just continue
 
         # Check for unsaved tab group changes
-        has_tab_changes = (self.current_tabs_file or self.tab_group_name) and self._has_tab_state_changed()
+        has_tab_changes = (self.tab_group_manager.current_tabs_file or self.tab_group_manager.tab_group_name) and self._has_tab_state_changed()
         if has_tab_changes:
-            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
-
-            # Create custom dialog
-            dialog = QDialog(self)
-            dialog.setWindowTitle("Unsaved Tab Group")
-            layout = QVBoxLayout()
-
             # Determine tab group name for display
-            group_name = self.tab_group_name
-            if not group_name and self.current_tabs_file:
-                filename = os.path.basename(self.current_tabs_file)
+            group_name = self.tab_group_manager.tab_group_name
+            if not group_name and self.tab_group_manager.current_tabs_file:
+                filename = os.path.basename(self.tab_group_manager.current_tabs_file)
                 group_name = filename[:-5] if filename.endswith('.tabs') else filename
             if not group_name:
                 group_name = "Current Tab Group"
 
-            # Message
-            message = QLabel(
-                f"The tab group '{group_name}' has unsaved changes.\n\n"
-                "This includes changes to:\n"
-                "  • Tabs added or removed\n"
-                "  • Tab emojis or display names\n"
-                "  • Tab group name\n\n"
-                "Would you like to save the tab group before exiting?"
-            )
-            message.setWordWrap(True)
-            layout.addWidget(message)
-
-            # Button style
-            button_style = """
-                QPushButton {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #F8F8F8, stop:1 #E0E0E0);
-                    border: 1px solid #B0B0B0;
-                    border-radius: 4px;
-                    padding: 8px 16px;
-                    min-width: 100px;
-                    min-height: 28px;
-                }
-                QPushButton:hover {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #FFFFFF, stop:1 #E8E8E8);
-                    border: 1px solid #909090;
-                }
-                QPushButton:pressed {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                      stop:0 #D0D0D0, stop:1 #C0C0C0);
-                    border: 1px solid #808080;
-                }
-            """
-
-            # Buttons
-            button_layout = QHBoxLayout()
-            button_layout.addStretch()
-
-            exit_btn = QPushButton("❌ Exit")
-            exit_btn.setToolTip("Exit without saving tab group")
-            exit_btn.setStyleSheet(button_style)
-            exit_btn.clicked.connect(lambda: dialog.done(1))  # Exit without saving
-            button_layout.addWidget(exit_btn)
-
-            cancel_btn = QPushButton("🔙 Cancel")
-            cancel_btn.setToolTip("Cancel and return to editing")
-            cancel_btn.setStyleSheet(button_style)
-            cancel_btn.clicked.connect(lambda: dialog.done(0))  # Cancel
-            button_layout.addWidget(cancel_btn)
-
-            save_exit_btn = QPushButton("💾 Save Group")
-            save_exit_btn.setToolTip("Save tab group and exit")
-            save_exit_btn.setStyleSheet(button_style)
-            save_exit_btn.clicked.connect(lambda: dialog.done(2))  # Save and exit
-            button_layout.addWidget(save_exit_btn)
-
-            layout.addLayout(button_layout)
-            dialog.setLayout(layout)
-            dialog.setMinimumWidth(400)
-
+            dialog = UnsavedGroupDialog(group_name, self)
             result = dialog.exec()
 
-            if result == 0:  # Cancel
+            if result == UnsavedGroupDialog.CANCEL:
                 event.ignore()
                 return
-            elif result == 2:  # Save group
-                if self.current_tabs_file:
-                    self.save_tabs(self.current_tabs_file)
+            elif result == UnsavedGroupDialog.SAVE_GROUP:
+                if self.tab_group_manager.current_tabs_file:
+                    self.save_tabs(self.tab_group_manager.current_tabs_file)
                 else:
                     self.save_group_as_dialog()
                     # Check if save was cancelled (state still differs from baseline)
                     if self._has_tab_state_changed():
                         event.ignore()
                         return
-            # result == 1: Exit without saving, just continue
+            # EXIT_WITHOUT_SAVING - just continue
 
         # Save settings and session before closing
         self.save_settings()
