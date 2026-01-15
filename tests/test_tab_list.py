@@ -210,21 +210,22 @@ class TestTabListWidget:
         widget = TabListWidget()
 
         # No tabs - divider should be hidden
-        assert widget.pinned_divider.isVisible() is False
+        # Use isHidden() since widget may not be shown
+        assert widget.pinned_divider.isHidden() is True
 
         # Only unpinned tabs - divider should be hidden
         unpinned = MockEditorTab("/path/to/unpinned.txt", is_pinned=False)
         widget.add_tab(unpinned)
-        assert widget.pinned_divider.isVisible() is False
+        assert widget.pinned_divider.isHidden() is True
 
-        # Add pinned tab - now divider should be visible
+        # Add pinned tab - now divider should be visible (not hidden)
         pinned = MockEditorTab("/path/to/pinned.txt", is_pinned=True)
         widget.add_tab(pinned)
-        assert widget.pinned_divider.isVisible() is True
+        assert widget.pinned_divider.isHidden() is False
 
         # Remove unpinned tab - only pinned left, divider should be hidden
         widget.remove_tab(unpinned)
-        assert widget.pinned_divider.isVisible() is False
+        assert widget.pinned_divider.isHidden() is True
 
         widget.close()
 
@@ -232,7 +233,8 @@ class TestTabListWidget:
         """Test drop indicator is hidden by default"""
         widget = TabListWidget()
 
-        assert widget.drop_indicator.isVisible() is False
+        # Use isHidden() since widget may not be shown
+        assert widget.drop_indicator.isHidden() is True
         assert widget.drop_indicator_index == -1
 
         widget.close()
@@ -243,11 +245,12 @@ class TestTabListWidget:
 
         # Show indicator first
         widget.show_drop_indicator_at(0)
-        assert widget.drop_indicator.isVisible() is True
+        # Use isHidden() since widget may not be shown
+        assert widget.drop_indicator.isHidden() is False
 
         # Hide it
         widget.hide_drop_indicator()
-        assert widget.drop_indicator.isVisible() is False
+        assert widget.drop_indicator.isHidden() is True
         assert widget.drop_indicator_index == -1
 
         widget.close()

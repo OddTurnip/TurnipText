@@ -226,6 +226,22 @@ class TestSettingsManager:
         assert 'Failed to load settings' in captured.out
 
 
+class MockEditorTab:
+    """Mock editor tab class for testing isinstance checks"""
+    def __init__(self, file_path=None, is_pinned=False):
+        self.file_path = file_path
+        self.is_pinned = is_pinned
+
+
+class MockTabItem:
+    """Mock tab item class for testing"""
+    def __init__(self, editor_tab, custom_icon=None, custom_emoji=None, custom_display_name=None):
+        self.editor_tab = editor_tab
+        self.custom_icon = custom_icon
+        self.custom_emoji = custom_emoji
+        self.custom_display_name = custom_display_name
+
+
 class TestGetTabsDataForSession:
     """Tests for get_tabs_data_for_session helper function"""
 
@@ -236,24 +252,15 @@ class TestGetTabsDataForSession:
         mock_tab_list = MagicMock()
         mock_tab_list.tab_items = []
 
-        class MockClass:
-            pass
-
-        result = get_tabs_data_for_session(mock_stack, mock_tab_list, MockClass)
+        result = get_tabs_data_for_session(mock_stack, mock_tab_list, MockEditorTab)
 
         assert result == []
 
     def test_extracts_basic_tab_data(self):
         """Test extracting basic tab data"""
-        mock_editor = MagicMock()
-        mock_editor.file_path = '/path/to/file.txt'
-        mock_editor.is_pinned = True
+        mock_editor = MockEditorTab('/path/to/file.txt', is_pinned=True)
 
-        mock_tab_item = MagicMock()
-        mock_tab_item.editor_tab = mock_editor
-        mock_tab_item.custom_icon = None
-        mock_tab_item.custom_emoji = None
-        mock_tab_item.custom_display_name = None
+        mock_tab_item = MockTabItem(mock_editor)
 
         mock_stack = MagicMock()
         mock_stack.count.return_value = 1
@@ -262,7 +269,7 @@ class TestGetTabsDataForSession:
         mock_tab_list = MagicMock()
         mock_tab_list.tab_items = [mock_tab_item]
 
-        result = get_tabs_data_for_session(mock_stack, mock_tab_list, type(mock_editor))
+        result = get_tabs_data_for_session(mock_stack, mock_tab_list, MockEditorTab)
 
         assert len(result) == 1
         assert result[0]['path'] == '/path/to/file.txt'
@@ -273,15 +280,14 @@ class TestGetTabsDataForSession:
 
     def test_extracts_custom_attributes(self):
         """Test extracting custom icon, emoji, and display name"""
-        mock_editor = MagicMock()
-        mock_editor.file_path = '/path/to/file.txt'
-        mock_editor.is_pinned = False
+        mock_editor = MockEditorTab('/path/to/file.txt', is_pinned=False)
 
-        mock_tab_item = MagicMock()
-        mock_tab_item.editor_tab = mock_editor
-        mock_tab_item.custom_icon = 'custom.png'
-        mock_tab_item.custom_emoji = '🎉'
-        mock_tab_item.custom_display_name = 'My File'
+        mock_tab_item = MockTabItem(
+            mock_editor,
+            custom_icon='custom.png',
+            custom_emoji='🎉',
+            custom_display_name='My File'
+        )
 
         mock_stack = MagicMock()
         mock_stack.count.return_value = 1
@@ -290,7 +296,7 @@ class TestGetTabsDataForSession:
         mock_tab_list = MagicMock()
         mock_tab_list.tab_items = [mock_tab_item]
 
-        result = get_tabs_data_for_session(mock_stack, mock_tab_list, type(mock_editor))
+        result = get_tabs_data_for_session(mock_stack, mock_tab_list, MockEditorTab)
 
         assert result[0]['icon'] == 'custom.png'
         assert result[0]['emoji'] == '🎉'
@@ -298,8 +304,7 @@ class TestGetTabsDataForSession:
 
     def test_skips_tabs_without_file_path(self):
         """Test that tabs without file paths are skipped"""
-        mock_editor = MagicMock()
-        mock_editor.file_path = None
+        mock_editor = MockEditorTab(None)
 
         mock_stack = MagicMock()
         mock_stack.count.return_value = 1
@@ -308,31 +313,17 @@ class TestGetTabsDataForSession:
         mock_tab_list = MagicMock()
         mock_tab_list.tab_items = []
 
-        result = get_tabs_data_for_session(mock_stack, mock_tab_list, type(mock_editor))
+        result = get_tabs_data_for_session(mock_stack, mock_tab_list, MockEditorTab)
 
         assert result == []
 
     def test_multiple_tabs(self):
         """Test extracting data from multiple tabs"""
-        mock_editor1 = MagicMock()
-        mock_editor1.file_path = '/file1.txt'
-        mock_editor1.is_pinned = True
+        mock_editor1 = MockEditorTab('/file1.txt', is_pinned=True)
+        mock_editor2 = MockEditorTab('/file2.txt', is_pinned=False)
 
-        mock_editor2 = MagicMock()
-        mock_editor2.file_path = '/file2.txt'
-        mock_editor2.is_pinned = False
-
-        mock_tab_item1 = MagicMock()
-        mock_tab_item1.editor_tab = mock_editor1
-        mock_tab_item1.custom_icon = None
-        mock_tab_item1.custom_emoji = '📄'
-        mock_tab_item1.custom_display_name = None
-
-        mock_tab_item2 = MagicMock()
-        mock_tab_item2.editor_tab = mock_editor2
-        mock_tab_item2.custom_icon = None
-        mock_tab_item2.custom_emoji = None
-        mock_tab_item2.custom_display_name = 'Second'
+        mock_tab_item1 = MockTabItem(mock_editor1, custom_emoji='📄')
+        mock_tab_item2 = MockTabItem(mock_editor2, custom_display_name='Second')
 
         mock_stack = MagicMock()
         mock_stack.count.return_value = 2
@@ -341,8 +332,8 @@ class TestGetTabsDataForSession:
         mock_tab_list = MagicMock()
         mock_tab_list.tab_items = [mock_tab_item1, mock_tab_item2]
 
-        # Need to match the type for isinstance check
-        result = get_tabs_data_for_session(mock_stack, mock_tab_list, type(mock_editor1))
+        # Use MockEditorTab class for isinstance check - all mock_editors are instances of it
+        result = get_tabs_data_for_session(mock_stack, mock_tab_list, MockEditorTab)
 
         assert len(result) == 2
         assert result[0]['path'] == '/file1.txt'
