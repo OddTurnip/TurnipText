@@ -47,13 +47,14 @@ class TestViewModes:
         tab_list_item.set_view_mode('minimized')
 
         assert tab_list_item.view_mode == 'minimized'
-        assert not tab_list_item.filename_label.isVisible()
-        assert not tab_list_item.save_btn.isVisible()
-        assert not tab_list_item.pin_btn.isVisible()
-        assert not tab_list_item.close_btn.isVisible()
-        assert not tab_list_item.modified_label.isVisible()
-        # Emoji should always be visible
-        assert tab_list_item.emoji_label.isVisible()
+        # Use isHidden() instead of isVisible() since widget may not be shown
+        assert tab_list_item.filename_label.isHidden()
+        assert tab_list_item.save_btn.isHidden()
+        assert tab_list_item.pin_btn.isHidden()
+        assert tab_list_item.close_btn.isHidden()
+        assert tab_list_item.modified_label.isHidden()
+        # Emoji should always be visible (not hidden)
+        assert not tab_list_item.emoji_label.isHidden()
 
     def test_set_normal_view_mode(self, tab_list_item):
         """Test switching to normal view mode"""
@@ -62,22 +63,24 @@ class TestViewModes:
         tab_list_item.set_view_mode('normal')
 
         assert tab_list_item.view_mode == 'normal'
-        assert tab_list_item.filename_label.isVisible()
-        assert tab_list_item.save_btn.isVisible()
-        assert tab_list_item.pin_btn.isVisible()
-        assert tab_list_item.close_btn.isVisible()
-        assert not tab_list_item.modified_label.isVisible()  # Only visible in maximized
+        # Use isHidden() instead of isVisible() since widget may not be shown
+        assert not tab_list_item.filename_label.isHidden()
+        assert not tab_list_item.save_btn.isHidden()
+        assert not tab_list_item.pin_btn.isHidden()
+        assert not tab_list_item.close_btn.isHidden()
+        assert tab_list_item.modified_label.isHidden()  # Only visible in maximized
 
     def test_set_maximized_view_mode(self, tab_list_item):
         """Test switching to maximized view mode"""
         tab_list_item.set_view_mode('maximized')
 
         assert tab_list_item.view_mode == 'maximized'
-        assert tab_list_item.filename_label.isVisible()
-        assert tab_list_item.save_btn.isVisible()
-        assert tab_list_item.pin_btn.isVisible()
-        assert tab_list_item.close_btn.isVisible()
-        assert tab_list_item.modified_label.isVisible()  # Only visible in maximized
+        # Use isHidden() instead of isVisible() since widget may not be shown
+        assert not tab_list_item.filename_label.isHidden()
+        assert not tab_list_item.save_btn.isHidden()
+        assert not tab_list_item.pin_btn.isHidden()
+        assert not tab_list_item.close_btn.isHidden()
+        assert not tab_list_item.modified_label.isHidden()  # Only visible in maximized
 
     def test_maximized_shows_last_modified_time(self, tab_list_item):
         """Test that maximized view shows last modified time"""

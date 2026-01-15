@@ -597,7 +597,9 @@ class FindReplaceDialog(QDialog):
                 first_result['text_edit'].setTextCursor(new_cursor)
                 first_result['text_edit'].ensureCursorVisible()
         else:
-            self.status_label.setText("Not found")
+            # Don't overwrite error messages (e.g., regex errors)
+            if "error" not in self.status_label.text().lower():
+                self.status_label.setText("Not found")
             self.results_table.hide()
 
     def _populate_results_table(self, show_tab_column):

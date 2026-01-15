@@ -22,20 +22,9 @@ def temp_settings_file(temp_dir):
 @pytest.fixture
 def editor_window(qapp, temp_settings_file, monkeypatch):
     """Create a TextEditorWindow for testing"""
-    # Monkey patch the settings file location
-    def mock_init(self, tabs_file=None):
-        # Call original __init__ but with our temp settings file
-        TextEditorWindow.__init__.__wrapped__(self, tabs_file)
-        self.settings_file = temp_settings_file
-
-    # Store original __init__
-    if not hasattr(TextEditorWindow.__init__, '__wrapped__'):
-        TextEditorWindow.__init__.__wrapped__ = TextEditorWindow.__init__
-
-    monkeypatch.setattr(TextEditorWindow, '__init__', mock_init)
-
     window = TextEditorWindow()
-    window.settings_file = temp_settings_file  # Ensure it's set
+    # Update the settings manager to use temp file
+    window.settings_manager.settings_file = temp_settings_file
     yield window
     window.close()
 
@@ -46,7 +35,7 @@ class TestWindowCreation:
     def test_window_creation(self, qapp, temp_settings_file):
         """Test creating a basic window"""
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
 
         assert window is not None
         # Window title is either "TurnipText" or derived from a loaded .tabs file
@@ -60,12 +49,12 @@ class TestWindowCreation:
     def test_window_has_required_components(self, qapp, temp_settings_file):
         """Test that window has all required components"""
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
 
         assert hasattr(window, 'content_stack')
         assert hasattr(window, 'tab_list')
         assert hasattr(window, 'splitter')
-        assert hasattr(window, 'current_tabs_file')
+        assert hasattr(window, 'tab_group_manager')  # current_tabs_file is now in tab_group_manager
         assert hasattr(window, 'last_file_folder')
         assert hasattr(window, 'last_tabs_folder')
 
@@ -78,7 +67,7 @@ class TestSettingsSaveLoad:
     def test_save_settings_creates_file(self, qapp, temp_settings_file):
         """Test that saving settings creates a file"""
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
 
         # Delete file if it exists
         if os.path.exists(temp_settings_file):
@@ -94,7 +83,7 @@ class TestSettingsSaveLoad:
     def test_save_settings_structure(self, qapp, temp_settings_file):
         """Test that saved settings have correct structure"""
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
 
         window.save_settings()
 
@@ -128,7 +117,7 @@ class TestSettingsSaveLoad:
             os.remove(temp_settings_file)
 
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
 
         # Should not crash
         window.load_settings()
@@ -140,7 +129,7 @@ class TestSettingsSaveLoad:
     def test_settings_roundtrip(self, qapp, temp_settings_file):
         """Test saving and loading settings"""
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
 
         # Set some values
         window.last_file_folder = "/test/path"
@@ -152,7 +141,7 @@ class TestSettingsSaveLoad:
 
         # Create new window and load
         window2 = TextEditorWindow()
-        window2.settings_file = temp_settings_file
+        window2.settings_manager.settings_file = temp_settings_file
         window2.load_settings()
 
         # Verify values were restored
@@ -170,7 +159,7 @@ class TestAutoSession:
     def test_auto_session_saves_tabs(self, qapp, temp_settings_file, temp_file):
         """Test that auto-session saves open tabs"""
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
 
         # Clear any auto-loaded tabs first
         while window.content_stack.count() > 0:
@@ -201,7 +190,14 @@ class TestAutoSession:
     def test_auto_session_saves_pinned_state(self, qapp, temp_settings_file, temp_file):
         """Test that auto-session saves pinned state"""
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
+
+        # Clear any auto-loaded tabs first
+        while window.content_stack.count() > 0:
+            widget = window.content_stack.widget(0)
+            window.content_stack.removeWidget(widget)
+            widget.deleteLater()
+        window.tab_list.tab_items.clear()
 
         # Open a pinned tab
         tab = TextEditorTab(temp_file)
@@ -224,7 +220,7 @@ class TestAutoSession:
     def test_auto_session_empty_when_no_tabs(self, qapp, temp_settings_file):
         """Test auto-session with no tabs open"""
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
 
         # Clear any auto-loaded tabs first
         while window.content_stack.count() > 0:
@@ -252,7 +248,7 @@ class TestViewMode:
     def test_view_mode_saves(self, qapp, temp_settings_file):
         """Test that view mode is saved"""
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
 
         # Set view mode
         window.tab_list.view_mode = "minimized"
@@ -285,7 +281,7 @@ class TestViewMode:
 
         # Create window and load
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
         window.load_settings()
 
         assert window.tab_list.view_mode == 'maximized'
@@ -299,7 +295,7 @@ class TestGeometryPersistence:
     def test_geometry_saves(self, qapp, temp_settings_file):
         """Test that window geometry is saved"""
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
 
         # Set geometry
         window.setGeometry(100, 200, 800, 600)
@@ -326,7 +322,7 @@ class TestCurrentTabFolder:
     def test_last_file_folder_persists(self, qapp, temp_settings_file):
         """Test that last file folder is saved and loaded"""
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
 
         test_path = "/home/user/documents"
         window.last_file_folder = test_path
@@ -335,7 +331,7 @@ class TestCurrentTabFolder:
 
         # Create new window
         window2 = TextEditorWindow()
-        window2.settings_file = temp_settings_file
+        window2.settings_manager.settings_file = temp_settings_file
         window2.load_settings()
 
         assert window2.last_file_folder == test_path
@@ -346,7 +342,7 @@ class TestCurrentTabFolder:
     def test_last_tabs_folder_persists(self, qapp, temp_settings_file):
         """Test that last tabs folder is saved and loaded"""
         window = TextEditorWindow()
-        window.settings_file = temp_settings_file
+        window.settings_manager.settings_file = temp_settings_file
 
         test_path = "/home/user/tab_sessions"
         window.last_tabs_folder = test_path
@@ -355,7 +351,7 @@ class TestCurrentTabFolder:
 
         # Create new window
         window2 = TextEditorWindow()
-        window2.settings_file = temp_settings_file
+        window2.settings_manager.settings_file = temp_settings_file
         window2.load_settings()
 
         assert window2.last_tabs_folder == test_path

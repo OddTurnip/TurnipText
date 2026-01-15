@@ -288,29 +288,30 @@ class TextEditorWindow(QMainWindow):
         self.history_combo.addItem("(no recent groups)")
         self.history_combo.setEnabled(False)
         self.history_combo.currentIndexChanged.connect(self._on_history_selected)
-        # Style the combo box
-        combo_style = """
-            QComboBox {
+        # Style the combo box with custom arrow image (required when styling ::drop-down)
+        arrow_path = os.path.join(get_app_dir(), 'icons', 'dropdown_arrow.png').replace('\\', '/')
+        combo_style = f"""
+            QComboBox {{
                 background-color: white;
                 border: 1px solid #B0B0B0;
                 border-radius: 4px;
                 padding: 4px 8px;
                 min-height: 20px;
-            }
-            QComboBox:hover {
+            }}
+            QComboBox:hover {{
                 border: 1px solid #909090;
-            }
-            QComboBox::drop-down {
-                border: none;
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
                 width: 20px;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 6px solid #666666;
-                margin-right: 6px;
-            }
+                border-left: 1px solid black;
+            }}
+            QComboBox::down-arrow {{
+                image: url({arrow_path});
+                width: 10px;
+                height: 6px;
+            }}
         """
         self.history_combo.setStyleSheet(combo_style)
         toolbar_row2.addWidget(self.history_combo)
