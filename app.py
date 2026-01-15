@@ -301,6 +301,9 @@ class TextEditorWindow(QMainWindow):
                 border: 1px solid #909090;
             }
             QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                width: 20px;
                 border-left: 1px solid black;
             }
         """
