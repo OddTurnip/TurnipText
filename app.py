@@ -288,7 +288,7 @@ class TextEditorWindow(QMainWindow):
         self.history_combo.addItem("(no recent groups)")
         self.history_combo.setEnabled(False)
         self.history_combo.currentIndexChanged.connect(self._on_history_selected)
-        # Style the combo box - keep default arrow for cross-platform compatibility
+        # Style the combo box with custom arrow (required when styling ::drop-down)
         combo_style = """
             QComboBox {
                 background-color: white;
@@ -305,6 +305,13 @@ class TextEditorWindow(QMainWindow):
                 subcontrol-position: center right;
                 width: 20px;
                 border-left: 1px solid black;
+            }
+            QComboBox::down-arrow {
+                width: 0;
+                height: 0;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #666666;
             }
         """
         self.history_combo.setStyleSheet(combo_style)
