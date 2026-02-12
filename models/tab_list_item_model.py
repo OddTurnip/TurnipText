@@ -3,8 +3,9 @@ Data model for a single text editor tab.
 Handles file I/O and content management.
 """
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox, QStackedLayout
 from widgets.text_editor import TextEditorWidget
+from widgets.drive_error_overlay import DriveErrorOverlay
 
 
 class TextEditorTab(QWidget):
@@ -16,17 +17,28 @@ class TextEditorTab(QWidget):
         self.is_modified = False
         self.is_pinned = False
         self._saved_content = ""  # Baseline content for change detection
+        self._drive_error_overlay = None  # Overlay for network drive errors
+        self._drive_error_shown = False  # Track overlay visibility state
 
-        # Create layout
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Use stacked layout so overlay can be shown on top of editor
+        self._stacked_layout = QStackedLayout()
+        self._stacked_layout.setContentsMargins(0, 0, 0, 0)
+        self._stacked_layout.setStackingMode(QStackedLayout.StackingMode.StackAll)
+
+        # Create editor container
+        editor_container = QWidget()
+        editor_layout = QVBoxLayout()
+        editor_layout.setContentsMargins(0, 0, 0, 0)
 
         # Create text edit widget
         self.text_edit = TextEditorWidget()
         self.text_edit.textChanged.connect(self.on_text_changed)
 
-        layout.addWidget(self.text_edit)
-        self.setLayout(layout)
+        editor_layout.addWidget(self.text_edit)
+        editor_container.setLayout(editor_layout)
+
+        self._stacked_layout.addWidget(editor_container)
+        self.setLayout(self._stacked_layout)
 
         # Load file if provided
         if file_path:
@@ -86,6 +98,31 @@ class TextEditorTab(QWidget):
                     parent_widget.update_tab_title(self)
                     break
                 parent_widget = parent_widget.parent()
+
+    def show_drive_error(self, drive_display_name, retry_callback):
+        """Show an overlay indicating the file's network drive is unavailable."""
+        if self._drive_error_overlay is None:
+            self._drive_error_overlay = DriveErrorOverlay(drive_display_name)
+            self._stacked_layout.addWidget(self._drive_error_overlay)
+        else:
+            self._drive_error_overlay.update_drive_name(drive_display_name)
+        self._drive_error_overlay.set_retry_callback(retry_callback)
+        self._drive_error_overlay.show()
+        self._drive_error_overlay.raise_()
+        self._drive_error_shown = True
+        self.text_edit.setReadOnly(True)
+
+    def hide_drive_error(self):
+        """Hide the drive error overlay and restore editing."""
+        if self._drive_error_overlay is not None:
+            self._drive_error_overlay.hide()
+        self._drive_error_shown = False
+        self.text_edit.setReadOnly(False)
+
+    @property
+    def has_drive_error(self):
+        """Whether the drive error overlay is currently shown."""
+        return self._drive_error_shown
 
     def get_content(self):
         """Get current text content"""

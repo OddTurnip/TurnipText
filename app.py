@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QSplitter, QStackedWidget,
     QLabel, QFrame, QLineEdit, QCheckBox, QComboBox, QDialog
 )
-from PyQt6.QtCore import Qt, QSize, QDateTime, QFileSystemWatcher
+from PyQt6.QtCore import Qt, QSize, QDateTime, QFileSystemWatcher, QTimer
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence, QIcon, QGuiApplication
 
 from constants import TAB_WIDTH_MINIMIZED, TAB_WIDTH_NORMAL, TAB_WIDTH_MAXIMIZED, MIN_SPLITTER_WIDTH
@@ -28,6 +28,7 @@ from windows.dialogs import (
 from styles import BUTTON_STYLE, MODIFIED_BUTTON_STYLE
 from managers.tab_groups import TabGroupManager, get_tabs_data_from_widgets
 from managers.settings import SettingsManager, get_tabs_data_for_session
+from utils.network_drive import is_drive_accessible
 
 
 def get_app_dir():
@@ -72,6 +73,7 @@ class TextEditorWindow(QMainWindow):
         self.file_watcher.fileChanged.connect(self._on_file_changed)
         self._pending_reload_files = set()  # Track files pending reload prompt
         self._saving_files = set()  # Track files being saved internally (to ignore watcher)
+        self._drive_retry_timers = {}  # file_path -> QTimer for exponential backoff retries
 
         self.init_ui()
         self.load_settings()
@@ -787,9 +789,12 @@ class TextEditorWindow(QMainWindow):
             elif reply == QMessageBox.StandardButton.Cancel:
                 return
 
-        # Remove from file watcher
+        # Remove from file watcher and cancel any drive retries
         if widget.file_path:
             self._unwatch_file(widget.file_path)
+            timer = self._drive_retry_timers.pop(widget.file_path, None)
+            if timer:
+                timer.stop()
 
         # Remove from tab list and content stack
         self.tab_list.remove_tab(widget)
@@ -822,20 +827,26 @@ class TextEditorWindow(QMainWindow):
         if file_path in self._pending_reload_files:
             return
 
-        # Find the tab for this file
-        tab = None
-        for i in range(self.content_stack.count()):
-            widget = self.content_stack.widget(i)
-            if isinstance(widget, TextEditorTab) and widget.file_path == file_path:
-                tab = widget
-                break
+        # If a retry is already in progress for this file, skip
+        if file_path in self._drive_retry_timers:
+            return
 
+        # Find the tab for this file
+        tab = self._find_tab_for_file(file_path)
         if not tab:
             return
 
         # Check if the file still exists
         if not os.path.exists(file_path):
-            # File was deleted
+            # Before declaring the file deleted, check if it's a network drive issue
+            accessible, drive_root, display_name = is_drive_accessible(file_path)
+
+            if not accessible:
+                # Network drive is down - start exponential backoff retry
+                self._start_drive_retry(file_path, tab, display_name)
+                return
+
+            # Drive is accessible but file is gone - it was truly deleted
             QMessageBox.warning(
                 self,
                 "File Deleted",
@@ -875,6 +886,138 @@ class TextEditorWindow(QMainWindow):
 
         # Re-add to watcher (file changes remove it on some systems)
         self._watch_file(file_path)
+
+    def _find_tab_for_file(self, file_path):
+        """Find the TextEditorTab widget for a given file path."""
+        for i in range(self.content_stack.count()):
+            widget = self.content_stack.widget(i)
+            if isinstance(widget, TextEditorTab) and widget.file_path == file_path:
+                return widget
+        return None
+
+    def _start_drive_retry(self, file_path, tab, drive_display_name):
+        """Start exponential backoff retry for a file on an inaccessible network drive.
+
+        Retries at 1s, 2s, 4s, 8s, 16s, 32s, 64s. If the drive comes back,
+        checks if the file still exists and prompts for reload if changed.
+        If all retries fail, shows an error overlay on the tab.
+        """
+        # Show overlay immediately
+        tab.show_drive_error(
+            drive_display_name,
+            lambda: self._manual_drive_retry(file_path)
+        )
+
+        # Start retry sequence
+        retry_state = {'attempt': 0, 'max_attempts': 7}  # 1s, 2s, 4s, 8s, 16s, 32s, 64s
+        self._schedule_drive_retry(file_path, tab, drive_display_name, retry_state)
+
+    def _schedule_drive_retry(self, file_path, tab, drive_display_name, retry_state):
+        """Schedule the next retry attempt with exponential backoff."""
+        if retry_state['attempt'] >= retry_state['max_attempts']:
+            # All automatic retries exhausted - keep overlay visible
+            # User can still click "Retry" button manually
+            self._drive_retry_timers.pop(file_path, None)
+            return
+
+        delay_ms = (2 ** retry_state['attempt']) * 1000  # 1s, 2s, 4s, 8s, 16s, 32s, 64s
+
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(
+            lambda: self._drive_retry_tick(file_path, tab, drive_display_name, retry_state)
+        )
+        self._drive_retry_timers[file_path] = timer
+        timer.start(delay_ms)
+
+    def _drive_retry_tick(self, file_path, tab, drive_display_name, retry_state):
+        """Execute one retry attempt to check if the network drive is back."""
+        accessible, _, _ = is_drive_accessible(file_path)
+
+        if accessible:
+            # Drive is back! Clean up and handle the file state
+            self._drive_retry_timers.pop(file_path, None)
+            self._on_drive_reconnected(file_path, tab)
+            return
+
+        # Drive still down - schedule next retry
+        retry_state['attempt'] += 1
+        self._schedule_drive_retry(file_path, tab, drive_display_name, retry_state)
+
+    def _on_drive_reconnected(self, file_path, tab):
+        """Handle successful drive reconnection."""
+        tab.hide_drive_error()
+
+        if os.path.exists(file_path):
+            # File still exists on the drive
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    disk_content = f.read()
+
+                if not tab._saved_content and not tab.text_edit.toPlainText():
+                    # Tab was created without loading (drive was down at startup)
+                    # Load the file content now
+                    tab._saved_content = disk_content
+                    tab.text_edit.setPlainText(disk_content)
+                    tab.is_modified = False
+                    self.tab_list.update_tab_display(tab)
+                elif disk_content != tab._saved_content:
+                    # File changed while drive was disconnected
+                    self._pending_reload_files.add(file_path)
+                    reply = QMessageBox.question(
+                        self,
+                        "File Changed",
+                        f"'{os.path.basename(file_path)}' was modified while the network drive "
+                        "was disconnected.\n\nDo you want to reload it?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    self._pending_reload_files.discard(file_path)
+
+                    if reply == QMessageBox.StandardButton.Yes:
+                        tab._saved_content = disk_content
+                        tab.text_edit.setPlainText(disk_content)
+                        tab.is_modified = False
+                        self.tab_list.update_tab_display(tab)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to read file after reconnection:\n{str(e)}")
+
+            # Re-add to watcher
+            self._watch_file(file_path)
+        else:
+            # Drive is back but file is gone - truly deleted
+            QMessageBox.warning(
+                self,
+                "File Deleted",
+                f"'{os.path.basename(file_path)}' was deleted while the network drive "
+                "was disconnected.\nThe file will be marked as unsaved."
+            )
+            tab.is_modified = True
+            self.tab_list.update_tab_display(tab)
+
+    def _manual_drive_retry(self, file_path):
+        """Handle manual retry from the overlay's Retry button.
+
+        Returns True if the drive is now accessible, False otherwise.
+        """
+        tab = self._find_tab_for_file(file_path)
+        if not tab:
+            return False
+
+        accessible, _, _ = is_drive_accessible(file_path)
+        if accessible:
+            # Cancel any pending automatic retry
+            timer = self._drive_retry_timers.pop(file_path, None)
+            if timer:
+                timer.stop()
+            self._on_drive_reconnected(file_path, tab)
+            return True
+        return False
+
+    def _cancel_all_drive_retries(self):
+        """Cancel all pending drive retry timers. Called during cleanup."""
+        for file_path, timer in list(self._drive_retry_timers.items()):
+            timer.stop()
+        self._drive_retry_timers.clear()
 
     def toggle_pin(self, widget):
         """Toggle pin status of a tab"""
@@ -1295,6 +1438,9 @@ class TextEditorWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to load tabs from:\n{tabs_file_path}")
             return
 
+        # Cancel all pending drive retries before closing tabs
+        self._cancel_all_drive_retries()
+
         # Close all existing tabs
         while self.content_stack.count() > 0:
             widget = self.content_stack.widget(0)
@@ -1309,21 +1455,33 @@ class TextEditorWindow(QMainWindow):
         # Create widgets for each tab
         for tab_data in tabs_data:
             file_path = tab_data['path']
+            file_exists = tab_data.get('exists', os.path.exists(file_path))
 
-            # Only load tabs for existing files
-            if not tab_data.get('exists', os.path.exists(file_path)):
-                continue
-
-            tab = TextEditorTab(file_path)
-            tab.is_pinned = tab_data.get('pinned', False)
-
-            # Add to content stack and tab list
-            self.content_stack.addWidget(tab)
-            tab_item = self.tab_list.add_tab(tab)
-            self.apply_markdown_to_tab(tab)
-            self.apply_line_numbers_to_tab(tab)
-            self.apply_monospace_to_tab(tab)
-            self._watch_file(file_path)
+            if not file_exists:
+                # Check if it's a network drive issue vs truly gone
+                accessible, drive_root, display_name = is_drive_accessible(file_path)
+                if accessible:
+                    # Drive is fine but file is gone - skip it
+                    continue
+                # Drive is down - create tab with overlay
+                tab = TextEditorTab(parent=None)
+                tab.file_path = file_path
+                tab.is_pinned = tab_data.get('pinned', False)
+                self.content_stack.addWidget(tab)
+                tab_item = self.tab_list.add_tab(tab)
+                self.apply_markdown_to_tab(tab)
+                self.apply_line_numbers_to_tab(tab)
+                self.apply_monospace_to_tab(tab)
+                self._start_drive_retry(file_path, tab, display_name)
+            else:
+                tab = TextEditorTab(file_path)
+                tab.is_pinned = tab_data.get('pinned', False)
+                self.content_stack.addWidget(tab)
+                tab_item = self.tab_list.add_tab(tab)
+                self.apply_markdown_to_tab(tab)
+                self.apply_line_numbers_to_tab(tab)
+                self.apply_monospace_to_tab(tab)
+                self._watch_file(file_path)
 
             # Set custom icon, emoji and display name if they were saved
             custom_icon = tab_data.get('icon')
@@ -1505,19 +1663,37 @@ class TextEditorWindow(QMainWindow):
         # Load each tab
         for tab_data in tabs_data:
             file_path = tab_data.get('path')
-            if not file_path or not os.path.exists(file_path):
+            if not file_path:
                 continue
 
-            tab = TextEditorTab(file_path)
-            tab.is_pinned = tab_data.get('pinned', False)
+            file_exists = os.path.exists(file_path)
 
-            # Add to content stack and tab list
-            self.content_stack.addWidget(tab)
-            tab_item = self.tab_list.add_tab(tab)
-            self.apply_markdown_to_tab(tab)
-            self.apply_line_numbers_to_tab(tab)
-            self.apply_monospace_to_tab(tab)
-            self._watch_file(file_path)
+            if not file_exists:
+                # Check if it's a network drive issue vs truly gone
+                accessible, drive_root, display_name = is_drive_accessible(file_path)
+                if accessible:
+                    # Drive is fine but file is gone - skip it
+                    continue
+                # Drive is down - create tab with overlay
+                tab = TextEditorTab(parent=None)  # Don't try to load the file
+                tab.file_path = file_path
+                tab.is_pinned = tab_data.get('pinned', False)
+                self.content_stack.addWidget(tab)
+                tab_item = self.tab_list.add_tab(tab)
+                self.apply_markdown_to_tab(tab)
+                self.apply_line_numbers_to_tab(tab)
+                self.apply_monospace_to_tab(tab)
+                # Show drive error and start retry
+                self._start_drive_retry(file_path, tab, display_name)
+            else:
+                tab = TextEditorTab(file_path)
+                tab.is_pinned = tab_data.get('pinned', False)
+                self.content_stack.addWidget(tab)
+                tab_item = self.tab_list.add_tab(tab)
+                self.apply_markdown_to_tab(tab)
+                self.apply_line_numbers_to_tab(tab)
+                self.apply_monospace_to_tab(tab)
+                self._watch_file(file_path)
 
             # Set custom icon, emoji and display name if they were saved
             custom_icon = tab_data.get('icon')
@@ -1551,6 +1727,9 @@ class TextEditorWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Handle window close event"""
+        # Cancel all pending drive retry timers
+        self._cancel_all_drive_retries()
+
         # Disconnect file watcher immediately to prevent callbacks during close
         try:
             self.file_watcher.fileChanged.disconnect(self._on_file_changed)
