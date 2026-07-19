@@ -124,7 +124,19 @@ Currently a thin wrapper around QTextEdit with:
 **Purpose**: Main application window
 
 **Features**:
-- Button toolbar (no menu bar - uses buttons)
+- Menu bar with dropdowns (File / Groups / Recent Groups / Settings / About)
+  built in `create_menu_bar()`; the Settings menu uses `StayOpenMenu` so its
+  checkboxes (Render Markdown, Line Numbers, Monospace, Auto-Save) can be toggled
+  without the menu closing. Settings are `QAction` objects
+  (`render_markdown_action`, `line_numbers_action`, `monospace_action`,
+  `autosave_action`).
+- Button toolbar below the menu bar (`create_button_toolbar()`): Save Current Tab /
+  Save All on the left; Insert Separator / New Entry / Scroll to Last Entry on the
+  right; then a row with Tab View toggle, Edit Tab, and Find & Replace.
+- Groups are auto-saved: `_autosave_group_if_possible()` persists the `.tabs` file
+  whenever a tab is added/removed or the group is edited (no manual "Save Group").
+- Auto-Save mode: when enabled the save buttons are hidden and replaced with a
+  "Last Autosave: ..." label; a `QTimer` saves files + group every 30s.
 - Tab list (left sidebar via splitter)
 - Content stack (main editing area)
 - View mode toggle (minimized/normal/maximized)
