@@ -8,13 +8,15 @@ import sys
 import os
 from pathlib import Path
 
+from datetime import datetime, timedelta
+
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMessageBox, QWidget,
     QVBoxLayout, QHBoxLayout, QPushButton, QSplitter, QStackedWidget,
-    QLabel, QFrame, QLineEdit, QCheckBox, QComboBox, QDialog
+    QLabel, QFrame, QLineEdit, QDialog, QMenu
 )
 from PyQt6.QtCore import Qt, QSize, QDateTime, QFileSystemWatcher, QTimer
-from PyQt6.QtGui import QAction, QShortcut, QKeySequence, QIcon, QGuiApplication
+from PyQt6.QtGui import QAction, QShortcut, QKeySequence, QIcon, QGuiApplication, QTextCursor
 
 from constants import TAB_WIDTH_MINIMIZED, TAB_WIDTH_NORMAL, TAB_WIDTH_MAXIMIZED, MIN_SPLITTER_WIDTH
 from models.tab_list_item_model import TextEditorTab
@@ -51,6 +53,22 @@ def get_resource_dir():
         return os.path.dirname(__file__)
 
 
+class StayOpenMenu(QMenu):
+    """A QMenu that stays open when a checkable action is toggled with the mouse.
+
+    Used for the Settings menu so several checkboxes can be toggled without the
+    menu closing after each click.
+    """
+
+    def mouseReleaseEvent(self, event):
+        action = self.actionAt(event.pos())
+        if action is not None and action.isEnabled() and action.isCheckable():
+            # Toggle in place and keep the menu open instead of dismissing it.
+            action.toggle()
+            return
+        super().mouseReleaseEvent(event)
+
+
 class TextEditorWindow(QMainWindow):
     """Main text editor window"""
 
@@ -60,6 +78,12 @@ class TextEditorWindow(QMainWindow):
         self.last_tabs_folder = None
         self._initial_splitter_set = False  # Track if initial splitter position has been applied
         self.find_replace_dialog = None  # Will be created when first needed
+
+        # Auto-save state
+        self._last_autosave_time = None  # datetime of the most recent autosave
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.setInterval(30000)  # Autosave / refresh label every 30s
+        self.autosave_timer.timeout.connect(self._do_autosave)
 
         # Settings manager handles preferences and session persistence
         settings_file = os.path.join(get_app_dir(), '.editor_settings.json')
@@ -85,6 +109,9 @@ class TextEditorWindow(QMainWindow):
             # Try to load auto-saved session
             self.load_auto_session()
 
+        # Initialize save button appearance/visibility now that tabs are loaded
+        self._update_save_buttons()
+
     def showEvent(self, event):
         """Handle window show event to set initial splitter position"""
         super().showEvent(event)
@@ -108,6 +135,9 @@ class TextEditorWindow(QMainWindow):
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+
+        # Create the menu bar (File / Groups / Recent Groups / Settings / About)
+        self.create_menu_bar()
 
         # Create button toolbar
         self.create_button_toolbar(main_layout)
@@ -159,8 +189,79 @@ class TextEditorWindow(QMainWindow):
         # Ctrl+I - Document Info/Statistics
         QShortcut(QKeySequence("Ctrl+I"), self).activated.connect(self.show_document_stats)
 
+    def create_menu_bar(self):
+        """Create the application menu bar with dropdown menus."""
+        menubar = self.menuBar()
+
+        # File menu
+        file_menu = menubar.addMenu("File")
+
+        new_tab_action = QAction("Create New Tab", self)
+        new_tab_action.setShortcut(QKeySequence("Ctrl+N"))
+        new_tab_action.triggered.connect(self.new_file)
+        file_menu.addAction(new_tab_action)
+
+        load_tab_action = QAction("Load Tab", self)
+        load_tab_action.setShortcut(QKeySequence("Ctrl+O"))
+        load_tab_action.triggered.connect(self.load_file)
+        file_menu.addAction(load_tab_action)
+
+        # Groups menu
+        groups_menu = menubar.addMenu("Groups")
+
+        new_group_action = QAction("Create New Group", self)
+        new_group_action.triggered.connect(self.new_group_dialog)
+        groups_menu.addAction(new_group_action)
+
+        load_group_action = QAction("Load Group", self)
+        load_group_action.triggered.connect(self.load_tabs_dialog)
+        groups_menu.addAction(load_group_action)
+
+        edit_group_action = QAction("Edit Current Group", self)
+        edit_group_action.triggered.connect(self.edit_tabs_dialog)
+        groups_menu.addAction(edit_group_action)
+
+        # Recent Groups menu - rebuilt each time it's opened
+        self.recent_groups_menu = menubar.addMenu("Recent Groups")
+        self.recent_groups_menu.aboutToShow.connect(self._populate_recent_groups_menu)
+
+        # Settings menu - checkboxes that keep the menu open when toggled
+        settings_menu = StayOpenMenu("Settings", self)
+        menubar.addMenu(settings_menu)
+
+        self.render_markdown_action = QAction("Render Markdown", self, checkable=True)
+        self.render_markdown_action.setToolTip("Enable markdown syntax highlighting")
+        self.render_markdown_action.setChecked(True)
+        self.render_markdown_action.toggled.connect(self.toggle_markdown_rendering)
+        settings_menu.addAction(self.render_markdown_action)
+
+        self.line_numbers_action = QAction("Line Numbers", self, checkable=True)
+        self.line_numbers_action.setToolTip("Show line numbers and highlight current line")
+        self.line_numbers_action.setChecked(True)
+        self.line_numbers_action.toggled.connect(self.toggle_line_numbers)
+        settings_menu.addAction(self.line_numbers_action)
+
+        self.monospace_action = QAction("Monospace", self, checkable=True)
+        self.monospace_action.setToolTip("Use monospace font (Consolas) for editing")
+        self.monospace_action.setChecked(False)
+        self.monospace_action.toggled.connect(self.toggle_monospace_font)
+        settings_menu.addAction(self.monospace_action)
+
+        settings_menu.addSeparator()
+
+        self.autosave_action = QAction("Auto-Save", self, checkable=True)
+        self.autosave_action.setToolTip("Automatically save files and group periodically")
+        self.autosave_action.setChecked(False)
+        self.autosave_action.toggled.connect(self._apply_autosave_state)
+        settings_menu.addAction(self.autosave_action)
+
+        # About - behaves like a button in the menu bar
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        menubar.addAction(about_action)
+
     def create_button_toolbar(self, layout):
-        """Create button toolbar with file operations"""
+        """Create the button toolbar (save + entry actions, then view controls)."""
         toolbar = QWidget()
         toolbar.setStyleSheet("QWidget { background-color: #E8E8E8; }")
         toolbar_main_layout = QVBoxLayout()
@@ -173,45 +274,29 @@ class TextEditorWindow(QMainWindow):
         # Store the default button style for later use
         self.default_button_style = button_style
 
-        # Label style
-        label_style = "font-weight: bold; margin-right: 5px;"
-
-        # First row: Tabs (file operations)
+        # First row: save actions (left) and entry helpers (right)
         toolbar_row1 = QHBoxLayout()
         toolbar_row1.setSpacing(8)
 
-        # Tabs label
-        tabs_label = QLabel("Tabs:")
-        tabs_label.setStyleSheet(label_style)
-        toolbar_row1.addWidget(tabs_label)
-
-        # New button
-        new_btn = QPushButton("📄 New")
-        new_btn.setToolTip("Create new file (Ctrl+N)")
-        new_btn.clicked.connect(self.new_file)
-        new_btn.setStyleSheet(button_style)
-        toolbar_row1.addWidget(new_btn)
-
-        # Load button
-        load_btn = QPushButton("📂 Load")
-        load_btn.setToolTip("Open file (Ctrl+O)")
-        load_btn.clicked.connect(self.load_file)
-        load_btn.setStyleSheet(button_style)
-        toolbar_row1.addWidget(load_btn)
-
-        # Save button (current tab)
-        self.save_btn = QPushButton("💾 Save")
+        # Save current tab button
+        self.save_btn = QPushButton("💾 Save Current Tab")
         self.save_btn.setToolTip("Save current tab (Ctrl+S)")
         self.save_btn.clicked.connect(self.save_current_tab)
         self.save_btn.setStyleSheet(button_style)
         toolbar_row1.addWidget(self.save_btn)
 
-        # Save All Changes button (saves files AND group)
-        self.save_all_btn = QPushButton("💾 Save All Changes")
+        # Save all button (saves files AND group)
+        self.save_all_btn = QPushButton("💾 Save All")
         self.save_all_btn.setToolTip("Save all modified files and group (Ctrl+Shift+S)")
         self.save_all_btn.clicked.connect(self.save_all)
         self.save_all_btn.setStyleSheet(button_style)
         toolbar_row1.addWidget(self.save_all_btn)
+
+        # Autosave status label (shown only while Auto-Save is enabled)
+        self.autosave_label = QLabel("")
+        self.autosave_label.setStyleSheet("color: #666666; font-style: italic; margin-left: 4px;")
+        self.autosave_label.setVisible(False)
+        toolbar_row1.addWidget(self.autosave_label)
 
         # Last saved all label
         self.last_saved_all_label = QLabel("")
@@ -219,15 +304,29 @@ class TextEditorWindow(QMainWindow):
         self.last_saved_all_label.setVisible(False)  # Hidden until first save
         toolbar_row1.addWidget(self.last_saved_all_label)
 
-        # Add stretch to push buttons to the left
+        # Push the entry helpers to the right side of the row
         toolbar_row1.addStretch()
 
-        # About button on the right
-        about_btn = QPushButton("ℹ️ About")
-        about_btn.setToolTip("About TurnipText")
-        about_btn.clicked.connect(self.show_about_dialog)
-        about_btn.setStyleSheet(button_style)
-        toolbar_row1.addWidget(about_btn)
+        # Insert Separator button
+        self.insert_separator_btn = QPushButton("➖ Insert Separator")
+        self.insert_separator_btn.setToolTip("Insert a separator line (20 dashes)")
+        self.insert_separator_btn.clicked.connect(self.insert_separator)
+        self.insert_separator_btn.setStyleSheet(button_style)
+        toolbar_row1.addWidget(self.insert_separator_btn)
+
+        # Insert New Entry button
+        self.new_entry_btn = QPushButton("📅 Insert New Entry")
+        self.new_entry_btn.setToolTip("Insert a new dated entry (separator line then # date)")
+        self.new_entry_btn.clicked.connect(self.new_entry)
+        self.new_entry_btn.setStyleSheet(button_style)
+        toolbar_row1.addWidget(self.new_entry_btn)
+
+        # Scroll to Last Entry button
+        self.scroll_last_entry_btn = QPushButton("⬇️ Scroll to Last Entry")
+        self.scroll_last_entry_btn.setToolTip("Scroll so the last entry header (#) is at the top, ignoring ## headers")
+        self.scroll_last_entry_btn.clicked.connect(self.scroll_to_last_entry)
+        self.scroll_last_entry_btn.setStyleSheet(button_style)
+        toolbar_row1.addWidget(self.scroll_last_entry_btn)
 
         toolbar_main_layout.addLayout(toolbar_row1)
 
@@ -237,111 +336,13 @@ class TextEditorWindow(QMainWindow):
         divider1.setStyleSheet("background-color: #888888; min-height: 1px; max-height: 1px;")
         toolbar_main_layout.addWidget(divider1)
 
-        # Second row: Groups (tab session operations)
+        # Second row: view mode controls, edit tab, find & replace
         toolbar_row2 = QHBoxLayout()
-        toolbar_row2.setSpacing(8)
-
-        # Groups label
-        groups_label = QLabel("Groups:")
-        groups_label.setStyleSheet(label_style)
-        toolbar_row2.addWidget(groups_label)
-
-        # New Group button
-        new_group_btn = QPushButton("📄 New Group")
-        new_group_btn.setToolTip("Create a new tab group")
-        new_group_btn.clicked.connect(self.new_group_dialog)
-        new_group_btn.setStyleSheet(button_style)
-        toolbar_row2.addWidget(new_group_btn)
-
-        # Load Group button
-        load_group_btn = QPushButton("📂 Load Group")
-        load_group_btn.setToolTip("Load tab group")
-        load_group_btn.clicked.connect(self.load_tabs_dialog)
-        load_group_btn.setStyleSheet(button_style)
-        toolbar_row2.addWidget(load_group_btn)
-
-        # Save Group button
-        self.save_group_btn = QPushButton("💾 Save Group")
-        self.save_group_btn.setToolTip("Save tab group")
-        self.save_group_btn.clicked.connect(self.save_group)
-        self.save_group_btn.setStyleSheet(button_style)
-        toolbar_row2.addWidget(self.save_group_btn)
-
-        # Edit Group button
-        edit_group_btn = QPushButton("✏️ Edit Group")
-        edit_group_btn.setToolTip("Edit tab group name")
-        edit_group_btn.clicked.connect(self.edit_tabs_dialog)
-        edit_group_btn.setStyleSheet(button_style)
-        toolbar_row2.addWidget(edit_group_btn)
-
-        # Separator before History
-        toolbar_row2.addSpacing(20)
-
-        # History label
-        history_label = QLabel("History:")
-        history_label.setStyleSheet(label_style)
-        toolbar_row2.addWidget(history_label)
-
-        # History dropdown
-        self.history_combo = QComboBox()
-        self.history_combo.setToolTip("Recently loaded tab groups")
-        self.history_combo.setMinimumWidth(150)
-        self.history_combo.setMaximumWidth(250)
-        self.history_combo.addItem("(no recent groups)")
-        self.history_combo.setEnabled(False)
-        self.history_combo.currentIndexChanged.connect(self._on_history_selected)
-        # Style the combo box with custom arrow image (required when styling ::drop-down)
-        arrow_path = os.path.join(get_app_dir(), 'icons', 'dropdown_arrow.png').replace('\\', '/')
-        combo_style = f"""
-            QComboBox {{
-                background-color: white;
-                border: 1px solid #B0B0B0;
-                border-radius: 4px;
-                padding: 4px 8px;
-                min-height: 20px;
-            }}
-            QComboBox:hover {{
-                border: 1px solid #909090;
-            }}
-            QComboBox::drop-down {{
-                subcontrol-origin: padding;
-                subcontrol-position: center right;
-                width: 20px;
-                border-left: 1px solid black;
-            }}
-            QComboBox::down-arrow {{
-                image: url({arrow_path});
-                width: 10px;
-                height: 6px;
-            }}
-        """
-        self.history_combo.setStyleSheet(combo_style)
-        toolbar_row2.addWidget(self.history_combo)
-
-        # Last saved label for groups
-        self.last_saved_label = QLabel("")
-        self.last_saved_label.setStyleSheet("color: #666666; font-style: italic; margin-left: 10px;")
-        self.last_saved_label.setVisible(False)  # Hidden until first save
-        toolbar_row2.addWidget(self.last_saved_label)
-
-        # Add stretch to push buttons to the left
-        toolbar_row2.addStretch()
-
-        toolbar_main_layout.addLayout(toolbar_row2)
-
-        # Add divider between rows
-        divider2 = QFrame()
-        divider2.setFrameShape(QFrame.Shape.HLine)
-        divider2.setStyleSheet("background-color: #888888; min-height: 1px; max-height: 1px;")
-        toolbar_main_layout.addWidget(divider2)
-
-        # Third row: view mode controls
-        toolbar_row3 = QHBoxLayout()
-        toolbar_row3.setSpacing(5)
+        toolbar_row2.setSpacing(5)
 
         # View mode label
         view_label = QLabel("Tab View:")
-        toolbar_row3.addWidget(view_label)
+        toolbar_row2.addWidget(view_label)
 
         # View mode buttons
         self.minimize_btn = QPushButton("📋")
@@ -349,7 +350,7 @@ class TextEditorWindow(QMainWindow):
         self.minimize_btn.setMaximumWidth(30)
         self.minimize_btn.setCheckable(True)
         self.minimize_btn.clicked.connect(lambda: self.set_tab_view_mode('minimized'))
-        toolbar_row3.addWidget(self.minimize_btn)
+        toolbar_row2.addWidget(self.minimize_btn)
 
         self.normal_btn = QPushButton("📑")
         self.normal_btn.setToolTip("Normal view (emoji + filename)")
@@ -357,64 +358,40 @@ class TextEditorWindow(QMainWindow):
         self.normal_btn.setCheckable(True)
         self.normal_btn.setChecked(True)  # Default mode
         self.normal_btn.clicked.connect(lambda: self.set_tab_view_mode('normal'))
-        toolbar_row3.addWidget(self.normal_btn)
+        toolbar_row2.addWidget(self.normal_btn)
 
         self.maximize_btn = QPushButton("📊")
         self.maximize_btn.setToolTip("Maximize tabs (emoji + filename + modified time)")
         self.maximize_btn.setMaximumWidth(30)
         self.maximize_btn.setCheckable(True)
         self.maximize_btn.clicked.connect(lambda: self.set_tab_view_mode('maximized'))
-        toolbar_row3.addWidget(self.maximize_btn)
+        toolbar_row2.addWidget(self.maximize_btn)
 
         # Separator
-        toolbar_row3.addSpacing(20)
+        toolbar_row2.addSpacing(20)
 
         # Edit tab button
         self.edit_emoji_btn = QPushButton("✏️ Edit Tab")
         self.edit_emoji_btn.setToolTip("Edit emoji and display name for selected tab")
         self.edit_emoji_btn.clicked.connect(self.edit_selected_emoji)
-        toolbar_row3.addWidget(self.edit_emoji_btn)
+        toolbar_row2.addWidget(self.edit_emoji_btn)
 
         # Find and Replace button
         self.find_replace_btn = QPushButton("🔍 Find && Replace")
         self.find_replace_btn.setToolTip("Find and replace text (Ctrl+F)")
         self.find_replace_btn.clicked.connect(self.show_find_replace)
-        toolbar_row3.addWidget(self.find_replace_btn)
+        toolbar_row2.addWidget(self.find_replace_btn)
 
-        # Separator
-        toolbar_row3.addSpacing(20)
+        # Add stretch to push controls to the left
+        toolbar_row2.addStretch()
 
-        # Render Markdown checkbox
-        self.render_markdown_checkbox = QCheckBox("Render Markdown")
-        self.render_markdown_checkbox.setToolTip("Enable markdown syntax highlighting")
-        self.render_markdown_checkbox.setChecked(True)  # Default to checked
-        self.render_markdown_checkbox.stateChanged.connect(self.toggle_markdown_rendering)
-        toolbar_row3.addWidget(self.render_markdown_checkbox)
+        toolbar_main_layout.addLayout(toolbar_row2)
 
-        # Line Numbers checkbox
-        self.line_numbers_checkbox = QCheckBox("Line Numbers")
-        self.line_numbers_checkbox.setToolTip("Show line numbers and highlight current line")
-        self.line_numbers_checkbox.setChecked(True)  # Default to checked
-        self.line_numbers_checkbox.stateChanged.connect(self.toggle_line_numbers)
-        toolbar_row3.addWidget(self.line_numbers_checkbox)
-
-        # Monospace checkbox
-        self.monospace_checkbox = QCheckBox("Monospace")
-        self.monospace_checkbox.setToolTip("Use monospace font (Consolas) for editing")
-        self.monospace_checkbox.setChecked(False)  # Default to unchecked (use system default)
-        self.monospace_checkbox.stateChanged.connect(self.toggle_monospace_font)
-        toolbar_row3.addWidget(self.monospace_checkbox)
-
-        # Add stretch to push buttons to the left
-        toolbar_row3.addStretch()
-
-        toolbar_main_layout.addLayout(toolbar_row3)
-
-        # Add divider after third row
-        divider3 = QFrame()
-        divider3.setFrameShape(QFrame.Shape.HLine)
-        divider3.setStyleSheet("background-color: #888888; min-height: 1px; max-height: 1px;")
-        toolbar_main_layout.addWidget(divider3)
+        # Add divider after second row
+        divider2 = QFrame()
+        divider2.setFrameShape(QFrame.Shape.HLine)
+        divider2.setStyleSheet("background-color: #888888; min-height: 1px; max-height: 1px;")
+        toolbar_main_layout.addWidget(divider2)
 
         toolbar.setLayout(toolbar_main_layout)
         layout.addWidget(toolbar)
@@ -492,8 +469,9 @@ class TextEditorWindow(QMainWindow):
             self.apply_monospace_to_tab(tab)
             self._watch_file(file_path)
             self.switch_to_tab(tab)
-            # Mark tab group as modified since a new tab was added
+            # Mark tab group as modified since a new tab was added, then persist it
             self.mark_tabs_metadata_modified()
+            self._autosave_group_if_possible()
 
     def load_file(self):
         """Load a file into a new tab"""
@@ -563,8 +541,9 @@ class TextEditorWindow(QMainWindow):
                 self.apply_monospace_to_tab(tab)
                 self._watch_file(file_path)
                 self.switch_to_tab(tab)
-                # Mark tab group as modified since a new tab was added
+                # Mark tab group as modified since a new tab was added, then persist it
                 self.mark_tabs_metadata_modified()
+                self._autosave_group_if_possible()
         except Exception as e:
             print(f"ERROR in load_file: {e}")
             import traceback
@@ -726,32 +705,124 @@ class TextEditorWindow(QMainWindow):
 
         if has_unsaved:
             self.save_btn.setStyleSheet(MODIFIED_BUTTON_STYLE)
-            self.save_btn.setText("⚠️ Save")
+            self.save_btn.setText("⚠️ Save Current Tab")
         else:
             self.save_btn.setStyleSheet(self.default_button_style)
-            self.save_btn.setText("💾 Save")
+            self.save_btn.setText("💾 Save Current Tab")
 
     def update_save_all_button(self):
-        """Update the Save All Changes button appearance based on whether there are unsaved changes"""
-        # Check for unsaved file changes
-        has_unsaved_files = False
+        """Update the Save All button appearance and visibility.
+
+        Save All is only relevant when a document *other* than the focused one has
+        unsaved changes (the focused one is covered by "Save Current Tab"), so the
+        button is hidden unless such an unfocused document exists. It is always
+        hidden while Auto-Save is enabled.
+        """
+        current_tab = self.get_current_tab()
+
+        # Unsaved changes in a document that is NOT the currently focused one
+        has_unfocused_unsaved = False
+        for i in range(self.content_stack.count()):
+            widget = self.content_stack.widget(i)
+            if (isinstance(widget, TextEditorTab) and widget is not current_tab
+                    and widget.is_modified and widget.file_path):
+                has_unfocused_unsaved = True
+                break
+
+        # Show only when there's an unfocused document to save (and not auto-saving)
+        autosave_on = hasattr(self, 'autosave_action') and self.autosave_action.isChecked()
+        self.save_all_btn.setVisible(has_unfocused_unsaved and not autosave_on)
+
+        if has_unfocused_unsaved:
+            self.save_all_btn.setStyleSheet(MODIFIED_BUTTON_STYLE)
+            self.save_all_btn.setText("⚠️ Save All")
+        else:
+            self.save_all_btn.setStyleSheet(self.default_button_style)
+            self.save_all_btn.setText("💾 Save All")
+
+    # ------------------------------------------------------------------
+    # Auto-save
+    # ------------------------------------------------------------------
+
+    def _autosave_group_if_possible(self):
+        """Persist the current group to its .tabs file, if one exists.
+
+        Called after actions that change group membership/metadata (new/load tab,
+        removing a tab, editing the group) so the group is always kept up to date
+        without a manual "Save Group" step.
+        """
+        if self.tab_group_manager.current_tabs_file:
+            self.save_tabs(self.tab_group_manager.current_tabs_file)
+
+    def _apply_autosave_state(self, *_):
+        """Show/hide the save buttons and start/stop the autosave timer."""
+        enabled = self.autosave_action.isChecked()
+        if enabled:
+            self.save_btn.setVisible(False)
+            self.save_all_btn.setVisible(False)
+            self.autosave_label.setVisible(True)
+            # Do an immediate autosave so the label has a sensible starting value
+            self._do_autosave()
+            self.autosave_timer.start()
+        else:
+            self.autosave_timer.stop()
+            self.autosave_label.setVisible(False)
+            self.save_btn.setVisible(True)
+            # Save All manages its own visibility (only when an unfocused doc changed)
+            self._update_save_buttons()
+
+    def _do_autosave(self):
+        """Save all modified files and the group (if any), then refresh the label."""
+        if not self.autosave_action.isChecked():
+            return
+
+        saved_any = False
+
         for i in range(self.content_stack.count()):
             widget = self.content_stack.widget(i)
             if isinstance(widget, TextEditorTab) and widget.is_modified and widget.file_path:
-                has_unsaved_files = True
-                break
+                self._saving_files.add(widget.file_path)
+                if widget.save_file():
+                    self.tab_list.update_tab_display(widget)
+                    saved_any = True
 
-        # Check for unsaved group changes
-        has_unsaved_group = (self.tab_group_manager.current_tabs_file or self.tab_group_manager.tab_group_name) and self._has_tab_state_changed()
+        # Persist the group too if its state changed
+        if self.tab_group_manager.current_tabs_file and self._has_tab_state_changed():
+            self.save_tabs(self.tab_group_manager.current_tabs_file)
+            saved_any = True
 
-        has_unsaved = has_unsaved_files or has_unsaved_group
+        if saved_any:
+            self._last_autosave_time = datetime.now()
 
-        if has_unsaved:
-            self.save_all_btn.setStyleSheet(MODIFIED_BUTTON_STYLE)
-            self.save_all_btn.setText("⚠️ Save All Changes")
-        else:
-            self.save_all_btn.setStyleSheet(self.default_button_style)
-            self.save_all_btn.setText("💾 Save All Changes")
+        self._update_save_buttons()
+        self._update_autosave_label()
+
+    def _autosave_label_text(self):
+        """Build the 'Last Autosave: ...' label text."""
+        if self._last_autosave_time is None:
+            return "Last Autosave: never"
+
+        now = datetime.now()
+        delta = now - self._last_autosave_time
+
+        if delta < timedelta(hours=1):
+            minutes = int(delta.total_seconds() // 60)
+            if minutes <= 0:
+                return "Last Autosave: just now"
+            unit = "minute" if minutes == 1 else "minutes"
+            return f"Last Autosave: {minutes} {unit} ago"
+
+        # More than an hour ago - show date/time (or "today" for the same day)
+        time_str = self._last_autosave_time.strftime("%H:%M")
+        if self._last_autosave_time.date() == now.date():
+            return f"Last Autosave: today {time_str}"
+        date_str = self._last_autosave_time.strftime("%Y-%m-%d")
+        return f"Last Autosave: {date_str} {time_str}"
+
+    def _update_autosave_label(self):
+        """Refresh the autosave label text if it's visible."""
+        if self.autosave_label.isVisible():
+            self.autosave_label.setText(self._autosave_label_text())
 
     def close_tab(self, widget):
         """Close the given tab widget"""
@@ -800,8 +871,9 @@ class TextEditorWindow(QMainWindow):
         self.tab_list.remove_tab(widget)
         self.content_stack.removeWidget(widget)
         widget.deleteLater()
-        # Mark tab group as modified since a tab was closed
+        # Mark tab group as modified since a tab was closed, then persist it
         self.mark_tabs_metadata_modified()
+        self._autosave_group_if_possible()
 
     def _watch_file(self, file_path):
         """Add a file to the file system watcher"""
@@ -1050,6 +1122,10 @@ class TextEditorWindow(QMainWindow):
         # Select it again
         self.tab_list.select_tab(new_tab_item)
 
+        # Pin status is part of the group state - persist it
+        self.mark_tabs_metadata_modified()
+        self._autosave_group_if_possible()
+
     def switch_to_tab(self, tab):
         """Switch to a specific tab"""
         if isinstance(tab, TextEditorTab):
@@ -1060,8 +1136,8 @@ class TextEditorWindow(QMainWindow):
             # Notify Find & Replace dialog about the tab switch
             if self.find_replace_dialog and self.find_replace_dialog.isVisible():
                 self.find_replace_dialog.update_current_tab(tab)
-            # Update Save button highlighting
-            self.update_save_button()
+            # Update Save button highlighting and Save All visibility (depends on focus)
+            self._update_save_buttons()
 
     def set_tab_view_mode(self, mode):
         """Set the view mode for the tab list"""
@@ -1073,14 +1149,13 @@ class TextEditorWindow(QMainWindow):
         # Update the tab list view mode
         self.tab_list.set_view_mode(mode)
 
-    def toggle_markdown_rendering(self, state):
+    def toggle_markdown_rendering(self, enabled):
         """Toggle markdown syntax highlighting on all tabs.
 
         Note: No need to save/restore is_modified state because TextEditorTab
         now compares actual text content against a saved baseline. Formatting
         changes from the highlighter don't modify text content.
         """
-        enabled = state == Qt.CheckState.Checked.value
         for i in range(self.content_stack.count()):
             widget = self.content_stack.widget(i)
             if isinstance(widget, TextEditorTab):
@@ -1092,13 +1167,12 @@ class TextEditorWindow(QMainWindow):
         Note: No need to save/restore is_modified state because TextEditorTab
         now compares actual text content against a saved baseline.
         """
-        if hasattr(self, 'render_markdown_checkbox'):
-            enabled = self.render_markdown_checkbox.isChecked()
+        if hasattr(self, 'render_markdown_action'):
+            enabled = self.render_markdown_action.isChecked()
             tab.text_edit.set_markdown_highlighting(enabled)
 
-    def toggle_line_numbers(self, state):
+    def toggle_line_numbers(self, enabled):
         """Toggle line numbers and current line highlighting on all tabs."""
-        enabled = state == Qt.CheckState.Checked.value
         for i in range(self.content_stack.count()):
             widget = self.content_stack.widget(i)
             if isinstance(widget, TextEditorTab):
@@ -1106,13 +1180,12 @@ class TextEditorWindow(QMainWindow):
 
     def apply_line_numbers_to_tab(self, tab):
         """Apply current line numbers setting to a tab."""
-        if hasattr(self, 'line_numbers_checkbox'):
-            enabled = self.line_numbers_checkbox.isChecked()
+        if hasattr(self, 'line_numbers_action'):
+            enabled = self.line_numbers_action.isChecked()
             tab.text_edit.set_line_numbers_visible(enabled)
 
-    def toggle_monospace_font(self, state):
+    def toggle_monospace_font(self, enabled):
         """Toggle monospace font on all tabs."""
-        enabled = state == Qt.CheckState.Checked.value
         for i in range(self.content_stack.count()):
             widget = self.content_stack.widget(i)
             if isinstance(widget, TextEditorTab):
@@ -1120,9 +1193,93 @@ class TextEditorWindow(QMainWindow):
 
     def apply_monospace_to_tab(self, tab):
         """Apply current monospace font setting to a tab."""
-        if hasattr(self, 'monospace_checkbox'):
-            enabled = self.monospace_checkbox.isChecked()
+        if hasattr(self, 'monospace_action'):
+            enabled = self.monospace_action.isChecked()
             tab.text_edit.set_monospace_font(enabled)
+
+    # ------------------------------------------------------------------
+    # Entry helpers (toolbar buttons)
+    # ------------------------------------------------------------------
+
+    def _insert_block_at_cursor(self, text):
+        """Insert ``text`` as a new line (or lines) at the cursor.
+
+        The text is placed on a fresh line so it never splits the current line,
+        and the cursor is left at the start of the inserted block.
+        """
+        tab = self.get_current_tab()
+        if not tab:
+            QMessageBox.information(self, "No File", "Please open a file first.")
+            return
+
+        editor = tab.text_edit
+        cursor = editor.textCursor()
+
+        if editor.toPlainText() == "":
+            # Empty document - insert directly with no leading blank line
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            cursor.insertText(text)
+            insert_start = cursor.position() - len(text)
+        else:
+            # Move to the end of the current line so we don't split it
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+            cursor.insertText("\n" + text)
+            insert_start = cursor.position() - len(text)
+
+        # Leave the cursor at the start of the inserted block
+        cursor.setPosition(insert_start)
+        editor.setTextCursor(cursor)
+        editor.ensureCursorVisible()
+
+    def insert_separator(self):
+        """Insert a separator line consisting of 80 dashes."""
+        self._insert_block_at_cursor("-" * 80)
+
+    def new_entry(self):
+        """Insert a new dated entry: a line of 80 equals then a '# date' header."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        self._insert_block_at_cursor("=" * 80 + "\n# " + today)
+
+    def scroll_to_last_entry(self):
+        """Scroll so the last entry header (a line starting with a single #) is at the top.
+
+        Lines starting with ## (or more) are ignored - only level-1 '#' headers count.
+        """
+        import re
+
+        tab = self.get_current_tab()
+        if not tab:
+            QMessageBox.information(self, "No File", "Please open a file first.")
+            return
+
+        editor = tab.text_edit
+        doc = editor.document()
+
+        last_block = None
+        block = doc.firstBlock()
+        while block.isValid():
+            # Level-1 header: starts with '#' not immediately followed by another '#'
+            if re.match(r'^#(?!#)', block.text()):
+                last_block = block
+            block = block.next()
+
+        if last_block is None:
+            QMessageBox.information(
+                self, "No Entries",
+                "No entry headers (lines starting with a single '#') were found."
+            )
+            return
+
+        # Move the cursor to the header line
+        cursor = editor.textCursor()
+        cursor.setPosition(last_block.position())
+        editor.setTextCursor(cursor)
+        editor.ensureCursorVisible()
+
+        # Scroll so the header line sits at the top of the viewport
+        rect = editor.cursorRect(cursor)
+        vbar = editor.verticalScrollBar()
+        vbar.setValue(vbar.value() + rect.top())
 
     def edit_selected_emoji(self):
         """Edit the emoji and display name for the selected tab"""
@@ -1160,6 +1317,7 @@ class TextEditorWindow(QMainWindow):
 
             selected_tab_item.update_display()
             self.mark_tabs_metadata_modified()
+            self._autosave_group_if_possible()
 
     def get_current_tab(self):
         """Get the currently active tab"""
@@ -1199,21 +1357,13 @@ class TextEditorWindow(QMainWindow):
         """Check if the current tab state differs from the baseline."""
         return self.tab_group_manager.has_state_changed(self._get_current_tab_state())
 
-    def update_save_group_button(self):
-        """Update the Save Group button appearance based on whether state has changed."""
-        # Only show as modified if there's a tabs file or tab group name to save to
-        has_changes = (self.tab_group_manager.current_tabs_file or self.tab_group_manager.tab_group_name) and self._has_tab_state_changed()
-
-        if has_changes:
-            self.save_group_btn.setText("⚠️ Save Group")
-            self.save_group_btn.setStyleSheet(MODIFIED_BUTTON_STYLE)
-        else:
-            self.save_group_btn.setText("💾 Save Group")
-            self.save_group_btn.setStyleSheet(self.default_button_style)
-
     def mark_tabs_metadata_modified(self):
-        """Called when tab metadata may have changed - updates button state."""
-        self.update_save_group_button()
+        """Called when tab metadata may have changed - updates button state.
+
+        Group changes are reflected in the "Save All" button (there is no longer a
+        dedicated "Save Group" button - the group is auto-saved on relevant edits).
+        """
+        self.update_save_all_button()
 
     def update_tab_title(self, tab):
         """Update the title of a tab"""
@@ -1232,6 +1382,7 @@ class TextEditorWindow(QMainWindow):
             self.tab_group_manager.tab_group_name = dialog.get_result()
             self.update_window_title()
             self.mark_tabs_metadata_modified()
+            self._autosave_group_if_possible()
 
     def show_about_dialog(self):
         """Show the About dialog with keyboard shortcuts and info"""
@@ -1283,15 +1434,6 @@ class TextEditorWindow(QMainWindow):
 
             # Save the empty group
             self.save_tabs(file_path)
-
-    def save_group(self):
-        """Save tab group to current location without prompting"""
-        if self.tab_group_manager.current_tabs_file:
-            # We have a location, save directly
-            self.save_tabs(self.tab_group_manager.current_tabs_file)
-        else:
-            # No location yet, prompt for one
-            self.save_group_as_dialog()
 
     def save_group_as_dialog(self):
         """Show dialog to save tab group to a new location"""
@@ -1367,17 +1509,9 @@ class TextEditorWindow(QMainWindow):
             # Update window title
             self.update_window_title()
 
-            # Update last saved timestamp
-            timestamp = self.tab_group_manager.get_last_saved_timestamp()
-            self.last_saved_label.setText(f"Saved group {timestamp}")
-            self.last_saved_label.setVisible(True)
-
             # Set baseline state and update button appearance
             self._set_baseline_tab_state()
-            self.update_save_group_button()
-
-            # Update history combo
-            self.update_history_combo()
+            self.update_save_all_button()
 
     def _check_unsaved_before_group_change(self):
         """Check for unsaved changes before switching groups. Returns True if safe to proceed."""
@@ -1515,53 +1649,37 @@ class TextEditorWindow(QMainWindow):
         # Set baseline state for change tracking
         self._set_baseline_tab_state()
 
-        # Update history combo
-        self.update_history_combo()
-
     def add_to_recent_groups(self, tabs_file_path):
         """Add a tabs file to the recent groups history"""
         self.tab_group_manager.add_to_recent_groups(tabs_file_path)
-        self.update_history_combo()
 
-    def update_history_combo(self):
-        """Update the history combo box with recent groups"""
-        # Block signals to prevent triggering selection handler
-        self.history_combo.blockSignals(True)
+    def _populate_recent_groups_menu(self):
+        """Rebuild the Recent Groups menu contents when it is about to be shown."""
+        self.recent_groups_menu.clear()
 
-        self.history_combo.clear()
-
-        if self.tab_group_manager.recent_groups:
-            self.history_combo.setEnabled(True)
-            for path in self.tab_group_manager.recent_groups:
-                # Show just the filename without extension
-                filename = os.path.basename(path)
-                if filename.endswith('.tabs'):
-                    display_name = filename[:-5]
-                else:
-                    display_name = filename
-                self.history_combo.addItem(display_name, path)
-        else:
-            self.history_combo.addItem("(no recent groups)")
-            self.history_combo.setEnabled(False)
-
-        # Reset to first item (or -1 for placeholder)
-        self.history_combo.setCurrentIndex(0 if self.tab_group_manager.recent_groups else -1)
-
-        self.history_combo.blockSignals(False)
-
-    def _on_history_selected(self, index):
-        """Handle selection from history dropdown"""
-        if index < 0 or not self.tab_group_manager.recent_groups:
+        recent = self.tab_group_manager.recent_groups
+        if not recent:
+            empty_action = QAction("(no recent groups)", self)
+            empty_action.setEnabled(False)
+            self.recent_groups_menu.addAction(empty_action)
             return
 
-        path = self.history_combo.itemData(index)
+        for path in recent:
+            filename = os.path.basename(path)
+            display_name = filename[:-5] if filename.endswith('.tabs') else filename
+            action = QAction(display_name, self)
+            action.setToolTip(path)
+            # Bind the path via default argument to avoid late-binding in the loop
+            action.triggered.connect(lambda checked=False, p=path: self._load_recent_group(p))
+            self.recent_groups_menu.addAction(action)
+
+    def _load_recent_group(self, path):
+        """Load a tab group selected from the Recent Groups menu."""
         if path and os.path.exists(path):
             # Don't reload if it's the current file
             if path != self.tab_group_manager.current_tabs_file:
                 # Check for unsaved changes first
                 if not self._check_unsaved_before_group_change():
-                    # User cancelled - reset combo to current group
-                    self.update_history_combo()
                     return
                 self.load_tabs(path)
         elif path:
@@ -1571,8 +1689,8 @@ class TextEditorWindow(QMainWindow):
                 "File Not Found",
                 f"The group file no longer exists:\n{path}\n\nIt will be removed from history."
             )
-            self.tab_group_manager.recent_groups.remove(path)
-            self.update_history_combo()
+            if path in self.tab_group_manager.recent_groups:
+                self.tab_group_manager.recent_groups.remove(path)
 
     def save_settings(self):
         """Save window settings and current session"""
@@ -1599,9 +1717,10 @@ class TextEditorWindow(QMainWindow):
             'last_tabs_folder': self.last_tabs_folder,
             'current_tabs_file': self.tab_group_manager.current_tabs_file,
             'view_mode': self.tab_list.view_mode,
-            'render_markdown': self.render_markdown_checkbox.isChecked(),
-            'line_numbers': self.line_numbers_checkbox.isChecked(),
-            'monospace': self.monospace_checkbox.isChecked(),
+            'render_markdown': self.render_markdown_action.isChecked(),
+            'line_numbers': self.line_numbers_action.isChecked(),
+            'monospace': self.monospace_action.isChecked(),
+            'auto_save': self.autosave_action.isChecked(),
             'recent_groups': self.tab_group_manager.recent_groups,
             'auto_session': self.settings_manager.build_auto_session(
                 tabs_data, current_index, self.tab_group_manager.tab_group_name
@@ -1635,14 +1754,16 @@ class TextEditorWindow(QMainWindow):
         self.set_tab_view_mode(self.settings_manager.get('view_mode', 'normal'))
 
         # Restore preferences
-        self.render_markdown_checkbox.setChecked(self.settings_manager.get('render_markdown', True))
-        self.line_numbers_checkbox.setChecked(self.settings_manager.get('line_numbers', True))
-        self.monospace_checkbox.setChecked(self.settings_manager.get('monospace', False))
+        self.render_markdown_action.setChecked(self.settings_manager.get('render_markdown', True))
+        self.line_numbers_action.setChecked(self.settings_manager.get('line_numbers', True))
+        self.monospace_action.setChecked(self.settings_manager.get('monospace', False))
+
+        # Restore auto-save (applies button visibility / starts the timer)
+        self.autosave_action.setChecked(self.settings_manager.get('auto_save', False))
 
         # Restore recent groups history
         self.tab_group_manager.recent_groups = self.settings_manager.get('recent_groups', [])
         self.tab_group_manager.filter_nonexistent_groups()
-        self.update_history_combo()
 
         if self.tab_group_manager.current_tabs_file:
             self.update_window_title()

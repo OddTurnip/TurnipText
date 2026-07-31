@@ -11,7 +11,10 @@ from PyQt6.QtWidgets import (
     QTextEdit, QMessageBox
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QTextDocument, QTextCursor, QColor, QBrush, QTextCharFormat
+from PyQt6.QtGui import (
+    QTextDocument, QTextCursor, QColor, QBrush, QTextCharFormat,
+    QShortcut, QKeySequence
+)
 
 import html
 import os
@@ -28,6 +31,11 @@ class FindReplaceDialog(QDialog):
         self.last_search_text = ""
         self.all_matches = []  # Store all match positions for Find All
         self.results_data = []  # Store result data for grid (tab, line, pos, text)
+
+        # Find Next/Previous navigation state
+        self._nav_sig = None      # Signature of the active navigation session
+        self._nav_matches = []    # Cached (start, end) ranges being cycled through
+        self._nav_index = -1      # Index of the current match within _nav_matches
 
         self.setWindowTitle("Find and Replace")
         self.setModal(False)
@@ -162,8 +170,31 @@ class FindReplaceDialog(QDialog):
 
         self.setLayout(layout)
 
+        # Prevent any button (e.g. the regex info button) from becoming the
+        # dialog's default button and stealing the Enter key. Pressing Enter in
+        # the Find field should run Find Next via its returnPressed signal.
+        for btn in self.findChildren(QPushButton):
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
+
+        # Route Undo/Redo to the editor so a replace can be undone from here,
+        # rather than undoing edits inside this dialog's input fields.
+        QShortcut(QKeySequence.StandardKey.Undo, self).activated.connect(self._undo_in_editor)
+        QShortcut(QKeySequence.StandardKey.Redo, self).activated.connect(self._redo_in_editor)
+        QShortcut(QKeySequence("Ctrl+Y"), self).activated.connect(self._redo_in_editor)
+
         # Update dropdown state based on initial radio selection
         self._on_scope_changed()
+
+    def _undo_in_editor(self):
+        """Undo the most recent change in the active text editor."""
+        if self.text_edit:
+            self.text_edit.undo()
+
+    def _redo_in_editor(self):
+        """Redo the most recent undone change in the active text editor."""
+        if self.text_edit:
+            self.text_edit.redo()
 
     def _populate_tab_dropdown(self):
         """Populate the tab dropdown with all open tabs"""
@@ -202,6 +233,7 @@ class FindReplaceDialog(QDialog):
         self.clear_all_highlights()
         self._clear_results_table()
         self._update_selection_radio_state()
+        self._nav_sig = None
 
     def _on_tab_dropdown_changed(self, index):
         """Handle tab dropdown selection change"""
@@ -246,6 +278,7 @@ class FindReplaceDialog(QDialog):
         self.status_label.setText("")
         self.clear_all_highlights()
         self._clear_results_table()
+        self._nav_sig = None
 
     def clear_all_highlights(self):
         """Clear all yellow highlights on current text edit"""
@@ -291,8 +324,13 @@ class FindReplaceDialog(QDialog):
                 return [(selected_tab.text_edit, selected_tab, None, None)]
             return [(self.text_edit, None, None, None)]
 
-    def highlight_all_matches(self, search_text):
-        """Highlight all matches in vivid yellow"""
+    def highlight_all_matches(self, search_text, current_match=None):
+        """Highlight all matches in vivid yellow.
+
+        If ``current_match`` is given as a ``(text_edit, start)`` tuple, the match
+        starting at that position is highlighted in orange instead of yellow so the
+        "current" Find Next/Previous result stands out from the rest.
+        """
         if not search_text:
             return 0
 
@@ -300,9 +338,16 @@ class FindReplaceDialog(QDialog):
         self._clear_all_tab_highlights()
         self.all_matches = []
 
-        # Create yellow highlight format
+        # Create yellow highlight format (all matches)
         highlight_format = QTextCharFormat()
         highlight_format.setBackground(QBrush(QColor(255, 255, 0)))  # Vivid yellow
+
+        # Create orange highlight format (the current Find Next/Previous match)
+        current_format = QTextCharFormat()
+        current_format.setBackground(QBrush(QColor(255, 150, 0)))  # Orange
+
+        current_edit = current_match[0] if current_match else None
+        current_start = current_match[1] if current_match else None
 
         total_count = 0
 
@@ -321,7 +366,8 @@ class FindReplaceDialog(QDialog):
                     cursor.setPosition(match_end, QTextCursor.MoveMode.KeepAnchor)
 
                     selection = QTextEdit.ExtraSelection()
-                    selection.format = highlight_format
+                    is_current = text_edit is current_edit and match_start == current_start
+                    selection.format = current_format if is_current else highlight_format
                     selection.cursor = cursor
                     extra_selections.append(selection)
                     self.all_matches.append((text_edit, match_end))
@@ -336,7 +382,8 @@ class FindReplaceDialog(QDialog):
                         break
 
                     selection = QTextEdit.ExtraSelection()
-                    selection.format = highlight_format
+                    is_current = text_edit is current_edit and cursor.selectionStart() == current_start
+                    selection.format = current_format if is_current else highlight_format
                     selection.cursor = cursor
                     extra_selections.append(selection)
                     self.all_matches.append((text_edit, cursor.position()))
@@ -357,128 +404,122 @@ class FindReplaceDialog(QDialog):
             flags |= QTextDocument.FindFlag.FindWholeWords
         return flags
 
-    def find_next(self):
-        """Find next occurrence"""
+    def _get_current_matches(self, search_text):
+        """Return a sorted list of (start, end) match ranges in the current text edit."""
+        matches = []
+        if self.regex_cb.isChecked():
+            doc_text = self.text_edit.toPlainText()
+            for start, end, _text in self._find_regex_matches(doc_text, search_text, 0):
+                matches.append((start, end))
+        else:
+            flags = self.get_find_flags()
+            cursor = self.text_edit.document().find(search_text, 0, flags)
+            while not cursor.isNull():
+                matches.append((cursor.selectionStart(), cursor.selectionEnd()))
+                cursor = self.text_edit.document().find(search_text, cursor, flags)
+        return matches
+
+    def _nav_signature(self, search_text):
+        """Signature used to detect when navigation state must reset."""
+        return (
+            id(self.text_edit),
+            search_text,
+            self.case_sensitive_cb.isChecked(),
+            self.whole_words_cb.isChecked(),
+            self.regex_cb.isChecked(),
+        )
+
+    def _cursor_in_current_match(self, pos):
+        """Whether the cursor is still within the last-navigated match."""
+        if 0 <= self._nav_index < len(self._nav_matches):
+            start, end = self._nav_matches[self._nav_index]
+            return start <= pos <= end
+        return False
+
+    def _navigate(self, direction):
+        """Move to the next (direction=1) or previous (direction=-1) match.
+
+        The current match is highlighted in orange to distinguish it from the
+        other (yellow) matches, and navigation cycles through matches in order.
+        """
         search_text = self.find_input.text()
         if not search_text:
             self.status_label.setText("Please enter text to find")
             return
 
-        # Highlight all matches first
-        count = self.highlight_all_matches(search_text)
-
-        if count == 0:
+        matches = self._get_current_matches(search_text)
+        if not matches:
+            self.highlight_all_matches(search_text)
             self.status_label.setText("Not found")
+            self._nav_sig = None
             return
 
-        # Get current cursor position to search from
-        current_cursor = self.text_edit.textCursor()
-        current_pos = current_cursor.position()
+        signature = self._nav_signature(search_text)
+        cursor_pos = self.text_edit.textCursor().position()
 
-        if self.regex_cb.isChecked():
-            # Regex mode
-            doc_text = self.text_edit.toPlainText()
-            matches = self._find_regex_matches(doc_text, search_text, current_pos)
+        # Continue cycling only if nothing relevant changed since the last navigation
+        continuing = (
+            signature == self._nav_sig
+            and self._nav_matches == matches
+            and self._cursor_in_current_match(cursor_pos)
+        )
 
-            if not matches:
-                # Try wrapping from beginning
-                matches = self._find_regex_matches(doc_text, search_text, 0)
-                if matches:
-                    self.status_label.setText("Wrapped to beginning")
-                    found_pos = matches[0][0]
-                else:
-                    self.status_label.setText("Not found")
-                    return
-            else:
-                self.status_label.setText("")
-                found_pos = matches[0][0]
+        wrapped = False
+        if continuing:
+            new_index = self._nav_index + direction
+            if new_index < 0:
+                new_index = len(matches) - 1
+                wrapped = True
+            elif new_index >= len(matches):
+                new_index = 0
+                wrapped = True
         else:
-            # Normal mode
-            flags = self.get_find_flags()
-            found_cursor = self.text_edit.document().find(search_text, current_pos, flags)
-
-            if found_cursor.isNull():
-                # Try wrapping from beginning
-                found_cursor = self.text_edit.document().find(search_text, 0, flags)
-
-                if not found_cursor.isNull():
-                    self.status_label.setText("Wrapped to beginning")
-                else:
-                    self.status_label.setText("Not found")
-                    return
+            # Fresh navigation: pick the match relative to the cursor position
+            if direction > 0:
+                new_index = next(
+                    (i for i, (s, e) in enumerate(matches) if s >= cursor_pos), None
+                )
+                if new_index is None:
+                    new_index = 0
+                    wrapped = True
             else:
-                self.status_label.setText("")
+                new_index = None
+                for i, (s, e) in enumerate(matches):
+                    if e <= cursor_pos:
+                        new_index = i
+                if new_index is None:
+                    new_index = len(matches) - 1
+                    wrapped = True
 
-            found_pos = found_cursor.selectionStart()
+        self._nav_matches = matches
+        self._nav_index = new_index
+        self._nav_sig = signature
 
-        # Move cursor to the found position WITHOUT selecting
-        # This way we only see the yellow highlights, not a grey selection
+        start, end = matches[new_index]
+
+        # Highlight all matches, colouring this one orange
+        self.highlight_all_matches(search_text, current_match=(self.text_edit, start))
+
+        # Move the cursor to the match (without a grey selection) and scroll into view
         new_cursor = self.text_edit.textCursor()
-        new_cursor.setPosition(found_pos)
+        new_cursor.setPosition(start)
         self.text_edit.setTextCursor(new_cursor)
         self.text_edit.ensureCursorVisible()
+
+        position = f"{new_index + 1} of {len(matches)}"
+        if wrapped:
+            where = "end" if direction < 0 else "beginning"
+            self.status_label.setText(f"Wrapped to {where} ({position})")
+        else:
+            self.status_label.setText(f"Match {position}")
+
+    def find_next(self):
+        """Find next occurrence"""
+        self._navigate(1)
 
     def find_previous(self):
         """Find previous occurrence"""
-        search_text = self.find_input.text()
-        if not search_text:
-            self.status_label.setText("Please enter text to find")
-            return
-
-        # Highlight all matches first
-        count = self.highlight_all_matches(search_text)
-
-        if count == 0:
-            self.status_label.setText("Not found")
-            return
-
-        # Get current cursor position to search from
-        current_cursor = self.text_edit.textCursor()
-        current_pos = current_cursor.position()
-
-        if self.regex_cb.isChecked():
-            # Regex mode: find all matches before current position
-            doc_text = self.text_edit.toPlainText()
-            # Get all matches, filter to those before current position
-            all_matches = self._find_regex_matches(doc_text, search_text, 0)
-            matches_before = [(s, e, t) for s, e, t in all_matches if e <= current_pos]
-
-            if not matches_before:
-                # Try wrapping from end
-                if all_matches:
-                    self.status_label.setText("Wrapped to end")
-                    found_pos = all_matches[-1][0]
-                else:
-                    self.status_label.setText("Not found")
-                    return
-            else:
-                self.status_label.setText("")
-                found_pos = matches_before[-1][0]  # Last match before current pos
-        else:
-            # Normal mode
-            flags = self.get_find_flags() | QTextDocument.FindFlag.FindBackward
-            found_cursor = self.text_edit.document().find(search_text, current_pos, flags)
-
-            if found_cursor.isNull():
-                # Try wrapping from end - use document length
-                doc_length = self.text_edit.document().characterCount()
-                found_cursor = self.text_edit.document().find(search_text, doc_length, flags)
-
-                if not found_cursor.isNull():
-                    self.status_label.setText("Wrapped to end")
-                else:
-                    self.status_label.setText("Not found")
-                    return
-            else:
-                self.status_label.setText("")
-
-            found_pos = found_cursor.selectionStart()
-
-        # Move cursor to the found position WITHOUT selecting
-        new_cursor = self.text_edit.textCursor()
-        new_cursor.setPosition(found_pos)
-        self.text_edit.setTextCursor(new_cursor)
-        self.text_edit.ensureCursorVisible()
+        self._navigate(-1)
 
     def find_all(self):
         """Find and highlight all occurrences, populate results grid"""
@@ -977,6 +1018,7 @@ class FindReplaceDialog(QDialog):
         # Clear highlights when toggling
         self.clear_all_highlights()
         self._clear_results_table()
+        self._nav_sig = None
 
     def _show_regex_help(self):
         """Show a dialog with regex help"""
