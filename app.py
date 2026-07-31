@@ -109,6 +109,9 @@ class TextEditorWindow(QMainWindow):
             # Try to load auto-saved session
             self.load_auto_session()
 
+        # Initialize save button appearance/visibility now that tabs are loaded
+        self._update_save_buttons()
+
     def showEvent(self, event):
         """Handle window show event to set initial splitter position"""
         super().showEvent(event)
@@ -311,15 +314,15 @@ class TextEditorWindow(QMainWindow):
         self.insert_separator_btn.setStyleSheet(button_style)
         toolbar_row1.addWidget(self.insert_separator_btn)
 
-        # New Entry button
-        self.new_entry_btn = QPushButton("🆕 New Entry")
-        self.new_entry_btn.setToolTip("Insert a new dated entry (20 equals then #date)")
+        # Insert New Entry button
+        self.new_entry_btn = QPushButton("📅 Insert New Entry")
+        self.new_entry_btn.setToolTip("Insert a new dated entry (separator line then # date)")
         self.new_entry_btn.clicked.connect(self.new_entry)
         self.new_entry_btn.setStyleSheet(button_style)
         toolbar_row1.addWidget(self.new_entry_btn)
 
         # Scroll to Last Entry button
-        self.scroll_last_entry_btn = QPushButton("⬆️ Scroll to Last Entry")
+        self.scroll_last_entry_btn = QPushButton("⬇️ Scroll to Last Entry")
         self.scroll_last_entry_btn.setToolTip("Scroll so the last entry header (#) is at the top, ignoring ## headers")
         self.scroll_last_entry_btn.clicked.connect(self.scroll_to_last_entry)
         self.scroll_last_entry_btn.setStyleSheet(button_style)
@@ -702,27 +705,35 @@ class TextEditorWindow(QMainWindow):
 
         if has_unsaved:
             self.save_btn.setStyleSheet(MODIFIED_BUTTON_STYLE)
-            self.save_btn.setText("⚠️ Save")
+            self.save_btn.setText("⚠️ Save Current Tab")
         else:
             self.save_btn.setStyleSheet(self.default_button_style)
-            self.save_btn.setText("💾 Save")
+            self.save_btn.setText("💾 Save Current Tab")
 
     def update_save_all_button(self):
-        """Update the Save All Changes button appearance based on whether there are unsaved changes"""
-        # Check for unsaved file changes
-        has_unsaved_files = False
+        """Update the Save All button appearance and visibility.
+
+        Save All is only relevant when a document *other* than the focused one has
+        unsaved changes (the focused one is covered by "Save Current Tab"), so the
+        button is hidden unless such an unfocused document exists. It is always
+        hidden while Auto-Save is enabled.
+        """
+        current_tab = self.get_current_tab()
+
+        # Unsaved changes in a document that is NOT the currently focused one
+        has_unfocused_unsaved = False
         for i in range(self.content_stack.count()):
             widget = self.content_stack.widget(i)
-            if isinstance(widget, TextEditorTab) and widget.is_modified and widget.file_path:
-                has_unsaved_files = True
+            if (isinstance(widget, TextEditorTab) and widget is not current_tab
+                    and widget.is_modified and widget.file_path):
+                has_unfocused_unsaved = True
                 break
 
-        # Check for unsaved group changes
-        has_unsaved_group = (self.tab_group_manager.current_tabs_file or self.tab_group_manager.tab_group_name) and self._has_tab_state_changed()
+        # Show only when there's an unfocused document to save (and not auto-saving)
+        autosave_on = hasattr(self, 'autosave_action') and self.autosave_action.isChecked()
+        self.save_all_btn.setVisible(has_unfocused_unsaved and not autosave_on)
 
-        has_unsaved = has_unsaved_files or has_unsaved_group
-
-        if has_unsaved:
+        if has_unfocused_unsaved:
             self.save_all_btn.setStyleSheet(MODIFIED_BUTTON_STYLE)
             self.save_all_btn.setText("⚠️ Save All")
         else:
@@ -757,7 +768,8 @@ class TextEditorWindow(QMainWindow):
             self.autosave_timer.stop()
             self.autosave_label.setVisible(False)
             self.save_btn.setVisible(True)
-            self.save_all_btn.setVisible(True)
+            # Save All manages its own visibility (only when an unfocused doc changed)
+            self._update_save_buttons()
 
     def _do_autosave(self):
         """Save all modified files and the group (if any), then refresh the label."""
@@ -1124,8 +1136,8 @@ class TextEditorWindow(QMainWindow):
             # Notify Find & Replace dialog about the tab switch
             if self.find_replace_dialog and self.find_replace_dialog.isVisible():
                 self.find_replace_dialog.update_current_tab(tab)
-            # Update Save button highlighting
-            self.update_save_button()
+            # Update Save button highlighting and Save All visibility (depends on focus)
+            self._update_save_buttons()
 
     def set_tab_view_mode(self, mode):
         """Set the view mode for the tab list"""
@@ -1220,13 +1232,13 @@ class TextEditorWindow(QMainWindow):
         editor.ensureCursorVisible()
 
     def insert_separator(self):
-        """Insert a separator line consisting of 20 dashes."""
-        self._insert_block_at_cursor("-" * 20)
+        """Insert a separator line consisting of 80 dashes."""
+        self._insert_block_at_cursor("-" * 80)
 
     def new_entry(self):
-        """Insert a new dated entry: a line of 20 equals then a #date header."""
+        """Insert a new dated entry: a line of 80 equals then a '# date' header."""
         today = datetime.now().strftime("%Y-%m-%d")
-        self._insert_block_at_cursor("=" * 20 + "\n#" + today)
+        self._insert_block_at_cursor("=" * 80 + "\n# " + today)
 
     def scroll_to_last_entry(self):
         """Scroll so the last entry header (a line starting with a single #) is at the top.

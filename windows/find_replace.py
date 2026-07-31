@@ -11,7 +11,10 @@ from PyQt6.QtWidgets import (
     QTextEdit, QMessageBox
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QTextDocument, QTextCursor, QColor, QBrush, QTextCharFormat
+from PyQt6.QtGui import (
+    QTextDocument, QTextCursor, QColor, QBrush, QTextCharFormat,
+    QShortcut, QKeySequence
+)
 
 import html
 import os
@@ -174,8 +177,24 @@ class FindReplaceDialog(QDialog):
             btn.setAutoDefault(False)
             btn.setDefault(False)
 
+        # Route Undo/Redo to the editor so a replace can be undone from here,
+        # rather than undoing edits inside this dialog's input fields.
+        QShortcut(QKeySequence.StandardKey.Undo, self).activated.connect(self._undo_in_editor)
+        QShortcut(QKeySequence.StandardKey.Redo, self).activated.connect(self._redo_in_editor)
+        QShortcut(QKeySequence("Ctrl+Y"), self).activated.connect(self._redo_in_editor)
+
         # Update dropdown state based on initial radio selection
         self._on_scope_changed()
+
+    def _undo_in_editor(self):
+        """Undo the most recent change in the active text editor."""
+        if self.text_edit:
+            self.text_edit.undo()
+
+    def _redo_in_editor(self):
+        """Redo the most recent undone change in the active text editor."""
+        if self.text_edit:
+            self.text_edit.redo()
 
     def _populate_tab_dropdown(self):
         """Populate the tab dropdown with all open tabs"""

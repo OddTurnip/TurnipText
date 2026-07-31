@@ -291,6 +291,9 @@ class AboutDialog(QDialog):
         about_text = QLabel("""
 A free text editor created by <a href="https://oddturnip.com">OddTurnip.com</a>,
 using <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.
+<br><br>
+Source: <a href="https://github.com/OddTurnip/TurnipText">GitHub</a><br>
+License: <a href="https://github.com/OddTurnip/TurnipText/blob/main/LICENSE.md">CC BY-NC-SA 4.0</a>
         """)
         about_text.setOpenExternalLinks(True)
         about_text.setWordWrap(True)

@@ -131,8 +131,10 @@ Currently a thin wrapper around QTextEdit with:
   (`render_markdown_action`, `line_numbers_action`, `monospace_action`,
   `autosave_action`).
 - Button toolbar below the menu bar (`create_button_toolbar()`): Save Current Tab /
-  Save All on the left; Insert Separator / New Entry / Scroll to Last Entry on the
-  right; then a row with Tab View toggle, Edit Tab, and Find & Replace.
+  Save All on the left; Insert Separator / Insert New Entry / Scroll to Last Entry on
+  the right; then a row with Tab View toggle, Edit Tab, and Find & Replace. "Save All"
+  is only shown when an unfocused document has unsaved changes (see
+  `update_save_all_button()`).
 - Groups are auto-saved: `_autosave_group_if_possible()` persists the `.tabs` file
   whenever a tab is added/removed or the group is edited (no manual "Save Group").
 - Auto-Save mode: when enabled the save buttons are hidden and replaced with a
